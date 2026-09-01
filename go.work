@@ -1,0 +1,9 @@
+go 1.24.0
+
+use (
+	./apps/api
+	./apps/data_collector
+	./apps/valuation-engine
+	./domains/marketdata
+	./domains/trading
+)

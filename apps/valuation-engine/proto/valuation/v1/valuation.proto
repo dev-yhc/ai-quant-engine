@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package valuation.v1;
+
+option go_package = "github.com/yhc/quant-engine-go/apps/valuation-engine/internal/grpc";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
+
+service BondEvaluationService {
+  rpc CalculateUSTreasury10YearTheoreticalYield(google.protobuf.Empty) returns (google.protobuf.DoubleValue);
+}
