@@ -5,8 +5,10 @@ package valuation.v1;
 option go_package = "github.com/yhc/quant-engine-go/apps/valuation-engine/internal/grpc";
 
 import "google/protobuf/empty.proto";
-import "google/protobuf/wrappers.proto";
+import "google/protobuf/struct.proto";
 
 service BondEvaluationService {
-  rpc CalculateUSTreasury10YearTheoreticalYield(google.protobuf.Empty) returns (google.protobuf.DoubleValue);
+  // Returns Actual, the three independent anchors, their equal-weight
+  // composite Anchor, de-biased Delta, and rolling ZScore.
+  rpc CalculateUSTreasury10YearTheoreticalYield(google.protobuf.Empty) returns (google.protobuf.Struct);
 }

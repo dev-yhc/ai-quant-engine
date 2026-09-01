@@ -8,8 +8,6 @@ import (
 
 	"github.com/gin-gonic/gin"
 	valuationclient "github.com/yhc/quant-engine-go/apps/valuation-engine/client"
-	tradinghttp "github.com/yhc/quant-engine-go/domains/trading/adapters/http"
-	"github.com/yhc/quant-engine-go/domains/trading/application"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -31,19 +29,17 @@ func main() {
 	defer valuationConnection.Close()
 	valuationClient := valuationclient.New(valuationConnection, 5*time.Second)
 	router.GET("/v1/bond-valuations/us-treasury/10-year/theoretical-yield", func(c *gin.Context) {
-		yield, err := valuationClient.CalculateUSTreasury10YearTheoreticalYield(c.Request.Context())
+		result, err := valuationClient.CalculateUSTreasury10YearTheoreticalYield(c.Request.Context())
 		if err != nil {
-			if grpcStatus, ok := status.FromError(err); ok && grpcStatus.Code() == codes.Unimplemented {
-				c.JSON(http.StatusNotImplemented, gin.H{"error": grpcStatus.Message()})
+			if grpcStatus, ok := status.FromError(err); ok && grpcStatus.Code() == codes.FailedPrecondition {
+				c.JSON(http.StatusUnprocessableEntity, gin.H{"error": grpcStatus.Message()})
 				return
 			}
 			c.JSON(http.StatusBadGateway, gin.H{"error": "valuation engine unavailable"})
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"theoretical_yield": yield})
+		c.JSON(http.StatusOK, result)
 	})
-
-	tradinghttp.RegisterRoutes(router.Group("/v1"), application.NewService())
 
 	address := os.Getenv("HTTP_ADDR")
 	if address == "" {

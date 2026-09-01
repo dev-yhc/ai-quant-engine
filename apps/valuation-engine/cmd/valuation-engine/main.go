@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/yhc/quant-engine-go/apps/valuation-engine/internal/adapters/postgres"
 	"github.com/yhc/quant-engine-go/apps/valuation-engine/internal/application"
 	valuationgrpc "github.com/yhc/quant-engine-go/apps/valuation-engine/internal/grpc"
 	"google.golang.org/grpc"
@@ -19,12 +20,18 @@ import (
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	repository, err := postgres.New(ctx, os.Getenv("DATABASE_CONNECTION_URL"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer repository.Close()
+
 	grpcListener, err := net.Listen("tcp", envOr("VALUATION_ENGINE_GRPC_ADDR", ":9090"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	grpcServer := grpc.NewServer()
-	valuationgrpc.RegisterBondEvaluationServer(grpcServer, valuationgrpc.NewBondEvaluationServer(application.BondEvaluationService{}))
+	valuationgrpc.RegisterBondEvaluationServer(grpcServer, valuationgrpc.NewBondEvaluationServer(application.NewBondEvaluationService(repository)))
 	go func() {
 		if err := grpcServer.Serve(grpcListener); err != nil {
 			log.Printf("gRPC server stopped: %v", err)

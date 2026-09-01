@@ -18,10 +18,25 @@ data-collector ──수집/적재──> shared PostgreSQL ──┘
 - `valuation-engine`은 외부 비공개 채권 평가 서비스다. Gin은 운영 상태 확인용 `GET /health`만 제공하며, 업무 호출은 gRPC `valuation.v1.BondEvaluationService`로 받는다.
 - `api`만 외부 HTTP 계약을 소유한다. `GET /v1/bond-valuations/us-treasury/10-year/theoretical-yield`는 gRPC 결과를 HTTP JSON으로 변환한다.
 - 공유 DB의 변경 이력은 `supabase/migrations/`에서 관리한다. baseline은 `market_data.observations`와 `market_data.research_datasets`만 만들며 Supabase 전용 기능을 사용하지 않는다. 적용 방법은 `supabase/README.md`를 따른다.
-- 미국채 10년물 이론금리 계산 로직과 이에 필요한 PostgreSQL 조회 구조는 TODO다. 계산 입력이 확정되기 전까지 사용하지 않는 저장소나 스키마를 만들지 않는다.
+- `valuation-engine`은 `market_data.observations`의 시점별 관측값을 forward-fill로 정렬하되 미래 관측값은 사용하지 않는다.
 
 ## 채권 평가 계약
 
-gRPC 메서드는 `CalculateUSTreasury10YearTheoreticalYield`이다. 내부 계산이 구현되기 전에는 gRPC `Unimplemented`를 반환하며, API는 이를 HTTP `501 Not Implemented`로 변환한다.
+gRPC 메서드는 `CalculateUSTreasury10YearTheoreticalYield`이다. 응답은 `Date`, `Actual`, 세 개의 독립 Anchor, 동일가중 복합 `Anchor`, `RawDistance`, `Bias`, `Delta`, `DistanceStdDev`, `ZScore`, `Signal`을 포함한다. 필수 시계열 또는 정렬 가능한 과거 표본이 부족하면 gRPC `FailedPrecondition`을 반환하며 API는 HTTP `422`로 변환한다.
+
+## Dynamic Valuation Anchor
+
+- Macro Fundamental Anchor: `HLW_R_STAR + T10YIE + ACM_TERM_PREMIUM`.
+- Statistical Dynamic Trend Anchor: 실측 `DGS10`에 대한 one-sided local-level Kalman filter. 각 시점의 상태와 분산은 해당 시점까지의 값으로만 갱신한다.
+- Regression Multi-factor Anchor: CPI 전년비, GDP 성장률, `DGS2-DGS3MO` 커브 기울기, `DFII10` 실질금리를 설명변수로 사용하는 rolling OLS. 현재 시점 예측에는 이전 시점까지의 학습 표본만 사용한다.
+- Composite Anchor: 문서에서 결합 가중치를 지정하지 않았으므로 세 Anchor의 동일가중 평균을 사용한다.
+- Signal Normalization: `D_t = Actual_t - Anchor_t`, `Delta_t = D_t - E[D_t]`, `Z_t = Delta_t / sigma_D`. 평균과 표준편차는 현재 시점을 제외한 이전 rolling distance로 계산한다.
+- `ZScore > 0`은 실제 금리가 Anchor보다 높아 채권 가격 기준 `UNDERVALUED`, `ZScore < 0`은 `OVERVALUED`, 0은 `FAIR`로 분류한다.
+
+기본 rolling window는 회귀 1,260 관측치, 정규화 756 관측치이며 최소 60개의 유효 표본을 요구한다. CPI와 GDP의 저빈도 관측치는 발표 이후 가장 최근 값만 forward-fill한다.
+
+## 입력 시계열 계약
+
+FRED 수집 대상은 `DGS10`, `T10YIE`, `DFII10`, `DGS2`, `DGS3MO`, `CPIAUCSL`, `A191RL1Q225SBEA`다. NY Fed 원본인 ACM Term Premium과 HLW r-star는 data-collector가 각각 `ACM_TERM_PREMIUM`, `HLW_R_STAR` series로 정규화해 `market_data.observations`에 저장해야 한다. 원본 workbook 자체는 `market_data.research_datasets`에 보존한다.
 
 이는 Gradle 멀티 모듈에 대응하는 Go workspace + 개별 `go.mod` 구조다. 모듈 경계는 빌드 도구가 강제하고, 의존성 방향은 `apps -> application/adapters -> domain`으로 유지한다. 서비스 간 의존성은 gRPC 계약을 통해서만 둔다.

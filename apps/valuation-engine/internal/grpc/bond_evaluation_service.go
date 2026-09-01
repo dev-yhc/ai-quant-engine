@@ -10,13 +10,13 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
-	"google.golang.org/protobuf/types/known/wrapperspb"
+	"google.golang.org/protobuf/types/known/structpb"
 )
 
 const calculateUSTreasury10YearTheoreticalYieldMethod = "/valuation.v1.BondEvaluationService/CalculateUSTreasury10YearTheoreticalYield"
 
 type BondEvaluationService interface {
-	CalculateUSTreasury10YearTheoreticalYield(context.Context, *emptypb.Empty) (*wrapperspb.DoubleValue, error)
+	CalculateUSTreasury10YearTheoreticalYield(context.Context, *emptypb.Empty) (*structpb.Struct, error)
 }
 
 type BondEvaluationServer struct {
@@ -27,15 +27,22 @@ func NewBondEvaluationServer(service application.BondEvaluationService) *BondEva
 	return &BondEvaluationServer{application: service}
 }
 
-func (s *BondEvaluationServer) CalculateUSTreasury10YearTheoreticalYield(ctx context.Context, _ *emptypb.Empty) (*wrapperspb.DoubleValue, error) {
-	yield, err := s.application.CalculateUSTreasury10YearTheoreticalYield(ctx)
-	if errors.Is(err, application.ErrNotImplemented) {
-		return nil, status.Error(codes.Unimplemented, err.Error())
-	}
+func (s *BondEvaluationServer) CalculateUSTreasury10YearTheoreticalYield(ctx context.Context, _ *emptypb.Empty) (*structpb.Struct, error) {
+	result, err := s.application.CalculateUSTreasury10YearTheoreticalYield(ctx)
 	if err != nil {
+		var inputError application.InputError
+		if errors.As(err, &inputError) {
+			return nil, status.Error(codes.FailedPrecondition, inputError.Error())
+		}
 		return nil, status.Error(codes.Internal, "bond evaluation failed")
 	}
-	return wrapperspb.Double(yield), nil
+	return structpb.NewStruct(map[string]any{
+		"date": result.Date.Format("2006-01-02"), "actual": result.Actual, "anchor": result.Anchor,
+		"macro_anchor": result.MacroAnchor, "statistical_anchor": result.StatisticalAnchor,
+		"regression_anchor": result.RegressionAnchor, "raw_distance": result.RawDistance,
+		"bias": result.Bias, "delta": result.Delta, "distance_std_dev": result.DistanceStdDev,
+		"z_score": result.ZScore, "signal": result.Signal,
+	})
 }
 
 func RegisterBondEvaluationServer(server grpc.ServiceRegistrar, service BondEvaluationService) {

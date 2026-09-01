@@ -32,10 +32,6 @@ func main() {
 		log.Fatal(err)
 	}
 	defer repository.Close()
-	if err := repository.EnsureSchema(ctx); err != nil {
-		log.Fatal(err)
-	}
-
 	httpClient := &http.Client{Timeout: 90 * time.Second}
 	fredAdapter, err := fred.New(settings.FredAPIKey, httpClient)
 	if err != nil {
