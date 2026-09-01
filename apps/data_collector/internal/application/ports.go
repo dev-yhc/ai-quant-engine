@@ -17,3 +17,10 @@ type TimeSeriesProvider interface {
 type ResearchFileProvider interface {
 	Dataset(ctx context.Context, name string) (domain.ResearchDataset, error)
 }
+
+// MarketDataRepository is the outbound persistence port shared by collection
+// activities. PostgreSQL/Supabase is an adapter detail.
+type MarketDataRepository interface {
+	SaveObservations(ctx context.Context, observations []domain.Observation) error
+	SaveResearchDataset(ctx context.Context, dataset domain.ResearchDataset) error
+}

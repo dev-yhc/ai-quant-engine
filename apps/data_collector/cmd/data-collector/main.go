@@ -4,17 +4,21 @@ import (
 	"context"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
+	"time"
 
 	"github.com/yhc/quant-engine-go/apps/data_collector/internal/adapters/fred"
 	"github.com/yhc/quant-engine-go/apps/data_collector/internal/adapters/nyfed"
+	"github.com/yhc/quant-engine-go/apps/data_collector/internal/adapters/postgres"
 	"github.com/yhc/quant-engine-go/apps/data_collector/internal/application"
 	"github.com/yhc/quant-engine-go/apps/data_collector/internal/config"
+	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/client"
+	"go.temporal.io/sdk/worker"
+	"go.temporal.io/sdk/workflow"
 )
 
 func main() {
-	dotenvPath, err := dotenvPath()
+	dotenvPath, err := config.DotenvPath()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -23,40 +27,44 @@ func main() {
 		log.Fatal(err)
 	}
 
-	client := &http.Client{}
-	fredAdapter, err := fred.New(settings.FredAPIKey, client)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	repository, err := postgres.New(ctx, settings.DatabaseConnectionURL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer repository.Close()
+	if err := repository.EnsureSchema(ctx); err != nil {
+		log.Fatal(err)
+	}
+
+	httpClient := &http.Client{Timeout: 90 * time.Second}
+	fredAdapter, err := fred.New(settings.FredAPIKey, httpClient)
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	ctx := context.Background()
-	fredResult, err := application.CollectFredValuationData(ctx, fredAdapter)
+	temporalClient, err := client.Dial(client.Options{
+		HostPort:  settings.TemporalHostPort,
+		Namespace: settings.TemporalNamespace,
+	})
 	if err != nil {
 		log.Fatal(err)
 	}
-	nyFedResult, err := application.CollectNYFedValuationData(ctx, nyfed.New(client))
-	if err != nil {
-		log.Fatal(err)
-	}
-	log.Printf("FRED collected: %d observations through %s", fredResult.ObservationCount, fredResult.LatestObservation.Format("2006-01-02"))
-	log.Printf("NY Fed collected: %d datasets", len(nyFedResult.Datasets))
-}
+	defer temporalClient.Close()
 
-func dotenvPath() (string, error) {
-	if configuredPath := os.Getenv("DATA_COLLECTOR_ENV_FILE"); configuredPath != "" {
-		return configuredPath, nil
+	activities := application.Activities{
+		FredProvider:  fredAdapter,
+		NYFedProvider: nyfed.New(httpClient),
+		Repository:    repository,
 	}
-	workingDirectory, err := os.Getwd()
-	if err != nil {
-		return "", err
+	temporalWorker := worker.New(temporalClient, settings.TemporalTaskQueue, worker.Options{})
+	temporalWorker.RegisterWorkflowWithOptions(application.CollectMarketDataWorkflow, workflow.RegisterOptions{Name: application.MarketDataCollectionWorkflowName})
+	temporalWorker.RegisterActivityWithOptions(activities.CollectFredValuationData, activity.RegisterOptions{Name: application.CollectFredValuationActivityName})
+	temporalWorker.RegisterActivityWithOptions(activities.CollectNYFedValuationData, activity.RegisterOptions{Name: application.CollectNYFedValuationActivityName})
+
+	log.Printf("starting Temporal worker: namespace=%s task_queue=%s", settings.TemporalNamespace, settings.TemporalTaskQueue)
+	if err := temporalWorker.Run(worker.InterruptCh()); err != nil {
+		log.Fatal(err)
 	}
-	for _, candidate := range []string{
-		filepath.Join(workingDirectory, ".env"),
-		filepath.Join(workingDirectory, "apps", "data_collector", ".env"),
-	} {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate, nil
-		}
-	}
-	return filepath.Join(workingDirectory, ".env"), nil
 }
