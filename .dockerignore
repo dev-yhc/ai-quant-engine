@@ -1,0 +1,6 @@
+.git
+.gitignore
+**/.env
+**/.DS_Store
+**/tmp
+**/bin

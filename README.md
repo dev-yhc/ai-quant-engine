@@ -48,7 +48,22 @@ valuation-engine은 `DATABASE_CONNECTION_URL`로 공유 PostgreSQL에 연결합�
 워크플로우는 FRED와 NY Fed 수집 액티비티를 차례로 실행하며, 각 액티비티는
 독립적인 재시도 정책을 가집니다.
 
-`apps/data_collector/.env.example`을 참고해 환경 변수를 설정한 뒤 워커를 실행합니다.
+### Local Temporal
+
+먼저 `apps/data_collector/.env.example`을 복사해 `apps/data_collector/.env`를
+만들고 실제 `DATABASE_CONNECTION_URL`, `FRED_API_KEY`를 입력합니다. Docker
+Desktop을 실행한 뒤 아래 명령으로 로컬 Temporal Server, Web UI와
+`data-collector` 워커를 함께 띄웁니다.
+Temporal gRPC는 `localhost:7233`, UI는 <http://localhost:8080>에서 제공됩니다.
+워커 컨테이너는 Compose 네트워크의 `temporal:7233`에 자동으로 연결됩니다.
+
+```bash
+cp apps/data_collector/.env.example apps/data_collector/.env
+docker compose -f docker-compose.temporal.yml up -d
+docker compose -f docker-compose.temporal.yml ps
+```
+
+호스트에서 워커를 직접 실행하려면 기존처럼 아래 명령을 사용할 수 있습니다.
 
 ```bash
 go run ./apps/data_collector/cmd/data-collector
@@ -59,8 +74,14 @@ go run ./apps/data_collector/cmd/data-collector
 정의할 수 있습니다. 기본값은 `Asia/Seoul` 기준 평일 06:00입니다.
 
 ```bash
-go run ./apps/data_collector/cmd/schedule-data-collector
+docker compose -f docker-compose.temporal.yml --profile tools run --rm data-collector-schedule
 ```
 
 같은 스케줄 ID를 다시 등록하면 Temporal이 중복 생성을 거부합니다. 변경하려면
 기존 스케줄을 Temporal CLI/UI에서 삭제 또는 갱신한 뒤 이 명령을 다시 실행하세요.
+
+로컬 Temporal 데이터까지 지우려면 다음 명령을 사용합니다.
+
+```bash
+docker compose -f docker-compose.temporal.yml down -v
+```
