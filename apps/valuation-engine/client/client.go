@@ -11,10 +11,23 @@ import (
 )
 
 const calculateUSTreasury10YearTheoreticalYieldMethod = "/valuation.v1.BondEvaluationService/CalculateUSTreasury10YearTheoreticalYield"
+const evaluateAndEnqueueUS10YearSignalMethod = "/valuation.v1.BondEvaluationService/EvaluateAndEnqueueUS10YearSignal"
 
 type Client struct {
 	connection grpc.ClientConnInterface
 	timeout    time.Duration
+}
+
+// EvaluateAndEnqueueUS10YearSignal runs the valuation-owned transaction that
+// records a daily signal event and queues it for alert routing.
+func (c Client) EvaluateAndEnqueueUS10YearSignal(ctx context.Context) (map[string]any, error) {
+	response := new(structpb.Struct)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+	if err := c.connection.Invoke(ctx, evaluateAndEnqueueUS10YearSignalMethod, &emptypb.Empty{}, response); err != nil {
+		return nil, err
+	}
+	return response.AsMap(), nil
 }
 
 func New(connection grpc.ClientConnInterface, timeout time.Duration) Client {

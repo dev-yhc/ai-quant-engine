@@ -7,6 +7,7 @@ Gin 기반의 새 Go 워크스페이스입니다. 기존 `quant-engine` 저장�
 ```
 apps/
   api/                 # 외부 HTTP 접점; valuation-engine을 gRPC로 호출
+  alert-dispatcher/    # valuation outbox를 Slack alert로 전송
   data_collector/      # 외부 시장·거시 데이터 수집기
   valuation-engine/    # 채권 평가용 내부 gRPC 서비스
 domains/
@@ -76,14 +77,28 @@ go run ./apps/data_collector/cmd/data-collector
 
 스케줄은 워커와 별도의 명령으로 한 번 등록합니다. `TEMPORAL_SCHEDULE_CRON`,
 `TEMPORAL_SCHEDULE_TIME_ZONE`, `TEMPORAL_SCHEDULE_ID`로 실행 시각과 식별자를
-정의할 수 있습니다. 기본값은 `Asia/Seoul` 기준 평일 06:00입니다.
+정의할 수 있습니다. 기본값은 `Asia/Seoul` 기준 매일 23:00입니다. 기존 ID의
+스케줄이 있으면 등록 명령은 새 cron/time zone으로 갱신합니다.
 
 ```bash
 docker compose -f docker-compose.temporal.yml --profile tools run --rm data-collector-schedule
 ```
 
-같은 스케줄 ID를 다시 등록하면 Temporal이 중복 생성을 거부합니다. 변경하려면
-기존 스케줄을 Temporal CLI/UI에서 삭제 또는 갱신한 뒤 이 명령을 다시 실행하세요.
+## Signal alerts
+
+수집 성공 뒤 `valuation-engine`은 US 10년물 valuation을 계산하고 같은
+transaction에서 `signal_events`와 `signal_outbox`를 기록합니다. `alert-dispatcher`는
+매일 정보성 alert를 만들고, 이전 signal과 달라진 `UNDERVALUED`/`OVERVALUED` signal에는
+별도의 거래 승인 요청 alert를 만듭니다. 승인 요청은 주문이 아니며, 이후 별도
+trading-engine이 처리할 `approval_request`만 생성합니다.
+
+실제 Slack incoming webhook을 연결한 경우에만 `SLACK_WEBHOOK_URL`을 환경에 추가하고
+dispatcher를 시작합니다. 현재 repository의 테스트는 로컬 HTTP mock으로 Slack payload만
+검증하며, 테스트나 기본 Compose 실행에서 Slack으로 메시지를 보내지 않습니다.
+
+```bash
+docker compose -f docker-compose.temporal.yml --profile alerts up -d alert-dispatcher
+```
 
 로컬 Temporal 데이터까지 지우려면 다음 명령을 사용합니다.
 

@@ -4,9 +4,11 @@ go 1.24.0
 
 require (
 	github.com/jackc/pgx/v5 v5.7.6
+	github.com/yhc/quant-engine-go/apps/valuation-engine v0.0.0
 	github.com/yhc/quant-engine-go/domains/marketdata v0.0.0
 	go.temporal.io/api v1.38.0
 	go.temporal.io/sdk v1.29.1
+	google.golang.org/grpc v1.76.0
 )
 
 require (
@@ -36,11 +38,12 @@ require (
 	golang.org/x/time v0.6.0 // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20250804133106-a7a43d27e69b // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20250804133106-a7a43d27e69b // indirect
-	google.golang.org/grpc v1.76.0 // indirect
 	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 replace github.com/yhc/quant-engine-go/domains/marketdata => ../../domains/marketdata
+
+replace github.com/yhc/quant-engine-go/apps/valuation-engine => ../valuation-engine
 
 replace google.golang.org/genproto v0.0.0-20200423170343-7949de9c1215 => google.golang.org/genproto v0.0.0-20240822170219-fc7c04adadcd

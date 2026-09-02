@@ -31,7 +31,8 @@ func main() {
 		log.Fatal(err)
 	}
 	grpcServer := grpc.NewServer()
-	valuationgrpc.RegisterBondEvaluationServer(grpcServer, valuationgrpc.NewBondEvaluationServer(application.NewBondEvaluationService(repository)))
+	evaluationService := application.NewBondEvaluationService(repository)
+	valuationgrpc.RegisterBondEvaluationServer(grpcServer, valuationgrpc.NewBondEvaluationServer(evaluationService, application.NewSignalEvaluationService(evaluationService, repository)))
 	go func() {
 		if err := grpcServer.Serve(grpcListener); err != nil {
 			log.Printf("gRPC server stopped: %v", err)
