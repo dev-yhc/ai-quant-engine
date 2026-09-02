@@ -40,13 +40,18 @@ go run ./apps/api/cmd/api
 
 valuation-engine은 `DATABASE_CONNECTION_URL`로 공유 PostgreSQL에 연결합니다. `VALUATION_ENGINE_GRPC_ADDR`은 엔진의 gRPC 주소(엔진 기본 `:9090`, API 기본 `localhost:9090`)이며, `VALUATION_ENGINE_HTTP_ADDR`은 Gin health endpoint 주소(기본 `:8081`)입니다.
 
-평가 엔진은 `market_data.observations`에서 `DGS10`, `T10YIE`, `DFII10`, `DGS2`, `DGS3MO`, `CPIAUCSL`, `A191RL1Q225SBEA`, `ACM_TERM_PREMIUM`, `HLW_R_STAR` 시계열을 읽습니다. 마지막 두 NY Fed 데이터셋은 data-collector가 원본 파일을 정규화한 뒤 해당 series 이름으로 저장해야 합니다.
+평가 엔진은 `market_data.observations`에서 `DGS10`, `T10YIE`, `DFII10`, `DGS2`, `DGS3MO`, `CPIAUCSL`, `A191RL1Q225SBEA`, `ACM_TERM_PREMIUM`, `HLW_R_STAR` 시계열을 읽습니다. 마지막 두 NY Fed 데이터셋은 data-collector activity가 공식 소스를 정규화해 해당 series 이름으로 upsert합니다. valuation 요청 경로에서는 NY Fed 원본을 다시 내려받거나 파싱하지 않습니다.
 
 ## Data collector / Temporal
 
 `data-collector`는 Temporal 워커로 실행됩니다. `market-data-collection`
 워크플로우는 FRED와 NY Fed 수집 액티비티를 차례로 실행하며, 각 액티비티는
 독립적인 재시도 정책을 가집니다.
+
+NY Fed Markets Data API는 ACM term premium을 제공하지 않습니다. 따라서 ACM은
+NY Fed Term Premia 인터랙티브의 공식 CSV에서 `RunDates`와 10년 `TERMYld`를 읽어
+`ACM_TERM_PREMIUM`으로 저장합니다. HLW workbook의 미국 Natural Rate는
+`HLW_R_STAR`로 저장합니다. 두 시계열은 수집 시점에 한 번만 정규화됩니다.
 
 ### Local Temporal
 

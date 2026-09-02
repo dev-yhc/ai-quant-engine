@@ -50,6 +50,8 @@ func main() {
 		log.Fatal(err)
 	}
 	log.Printf("FRED collected: %d observations through %s", fredResult.ObservationCount, fredResult.LatestObservation.Format("2006-01-02"))
-	log.Printf("NY Fed collected: %d datasets", len(nyFedResult.Datasets))
+	for _, dataset := range nyFedResult.Datasets {
+		log.Printf("NY Fed collected: series=%s observations=%d through=%s", dataset.Series, dataset.ObservationCount, dataset.LatestObservation.Format("2006-01-02"))
+	}
 	log.Printf("PostgreSQL rows: %d observations, %d research datasets", counts.Observations, counts.Datasets)
 }

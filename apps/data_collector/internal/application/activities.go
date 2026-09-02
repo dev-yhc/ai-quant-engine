@@ -26,7 +26,7 @@ type FredCollectionResult struct {
 // Workflow code remains deterministic and never receives these dependencies.
 type Activities struct {
 	FredProvider  TimeSeriesProvider
-	NYFedProvider ResearchFileProvider
+	NYFedProvider ResearchTimeSeriesProvider
 	Repository    MarketDataRepository
 }
 
@@ -58,9 +58,12 @@ func CollectFredValuationData(ctx context.Context, provider TimeSeriesProvider, 
 }
 
 type NYFedDatasetResult struct {
-	Name        string
-	Bytes       int
-	ContentType string
+	Name              string
+	Series            string
+	Bytes             int
+	ContentType       string
+	ObservationCount  int
+	LatestObservation time.Time
 }
 
 type NYFedCollectionResult struct {
@@ -70,7 +73,7 @@ type NYFedCollectionResult struct {
 
 // CollectNYFedValuationData is a separate activity so provider failures and
 // retry policies remain isolated from FRED collection.
-func CollectNYFedValuationData(ctx context.Context, provider ResearchFileProvider, repository MarketDataRepository) (NYFedCollectionResult, error) {
+func CollectNYFedValuationData(ctx context.Context, provider ResearchTimeSeriesProvider, repository MarketDataRepository) (NYFedCollectionResult, error) {
 	result := NYFedCollectionResult{Provider: "ny_fed"}
 	for _, name := range NYFedValuationDatasets {
 		dataset, err := provider.Dataset(ctx, name)
@@ -80,9 +83,23 @@ func CollectNYFedValuationData(ctx context.Context, provider ResearchFileProvide
 		if err := repository.SaveResearchDataset(ctx, dataset); err != nil {
 			return NYFedCollectionResult{}, fmt.Errorf("persist NY Fed dataset %q: %w", name, err)
 		}
-		result.Datasets = append(result.Datasets, NYFedDatasetResult{
-			Name: dataset.Name, Bytes: len(dataset.Content), ContentType: dataset.ContentType,
-		})
+		observations, err := provider.Observations(dataset)
+		if err != nil {
+			return NYFedCollectionResult{}, fmt.Errorf("normalize NY Fed dataset %q: %w", name, err)
+		}
+		if len(observations) == 0 {
+			return NYFedCollectionResult{}, fmt.Errorf("normalize NY Fed dataset %q: no observations", name)
+		}
+		if err := repository.SaveObservations(ctx, observations); err != nil {
+			return NYFedCollectionResult{}, fmt.Errorf("persist NY Fed observations %q: %w", name, err)
+		}
+		datasetResult := NYFedDatasetResult{Name: dataset.Name, Series: observations[0].Series, Bytes: len(dataset.Content), ContentType: dataset.ContentType, ObservationCount: len(observations)}
+		for _, observation := range observations {
+			if observation.ObservedAt.After(datasetResult.LatestObservation) {
+				datasetResult.LatestObservation = observation.ObservedAt
+			}
+		}
+		result.Datasets = append(result.Datasets, datasetResult)
 	}
 	return result, nil
 }

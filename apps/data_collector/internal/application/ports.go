@@ -12,10 +12,11 @@ type TimeSeriesProvider interface {
 	Observations(ctx context.Context, seriesIDs []string) ([]domain.Observation, error)
 }
 
-// ResearchFileProvider supplies versioned research datasets such as NY Fed
-// workbooks. Its interface deliberately differs from time-series collection.
-type ResearchFileProvider interface {
+// ResearchTimeSeriesProvider downloads a versioned research dataset and
+// normalizes its valuation series before the activity persists both forms.
+type ResearchTimeSeriesProvider interface {
 	Dataset(ctx context.Context, name string) (domain.ResearchDataset, error)
+	Observations(dataset domain.ResearchDataset) ([]domain.Observation, error)
 }
 
 // MarketDataRepository is the outbound persistence port shared by collection
