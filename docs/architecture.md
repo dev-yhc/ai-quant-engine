@@ -17,6 +17,7 @@ data-collector ──수집/적재──> shared PostgreSQL ──┘
 - `data-collector`는 시장·거시 데이터를 수집하는 데이터 생산자다. 수집·정규화된 데이터는 `valuation-engine`과 공유하는 PostgreSQL을 통해 전달한다. 현재 호스트는 Supabase이며, 두 서비스는 같은 `DATABASE_CONNECTION_URL`을 사용한다.
 - `valuation-engine`은 외부 비공개 채권 평가 서비스다. Gin은 운영 상태 확인용 `GET /health`만 제공하며, 업무 호출은 gRPC `valuation.v1.BondEvaluationService`로 받는다.
 - `api`만 외부 HTTP 계약을 소유한다. `GET /v1/bond-valuations/us-treasury/10-year/theoretical-yield`는 gRPC 결과를 HTTP JSON으로 변환한다.
+- `trading-engine`의 핵심 책임은 주문 의도를 검증하고 안전하게 실행하는 것이다. 현재의 trading book 조회와 포트폴리오 알림 endpoint는 운영상 임시 경계이며, 조회량·알림 전달이 주문 처리의 가용성이나 지연에 영향을 주기 전에 portfolio/account 서비스로 분리한다. 그 서비스는 trading-engine의 주문 상태를 직접 소유하거나 주문 실행 경로에 동기 의존해서는 안 된다.
 - 공유 DB의 변경 이력은 `supabase/migrations/`에서 관리한다. baseline은 `market_data.observations`와 `market_data.research_datasets`만 만들며 Supabase 전용 기능을 사용하지 않는다. 적용 방법은 `supabase/README.md`를 따른다.
 - `valuation-engine`은 `market_data.observations`의 시점별 관측값을 forward-fill로 정렬하되 미래 관측값은 사용하지 않는다.
 

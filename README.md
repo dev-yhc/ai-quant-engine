@@ -70,6 +70,8 @@ go run ./apps/trading-engine/cmd/trading-engine
 
 `POST /v1/trading-book/alerts`는 같은 현재 스냅샷을 반환하면서 `trading.portfolio_alert_outbox`에 durable alert를 적재합니다. `alert-dispatcher`가 이 outbox를 polling하여 Slack으로 종목별 원화 평가액과 비중을 보냅니다. 조회 GET은 알림을 만들지 않으므로 화면 갱신이 알림을 중복 발송하지 않습니다. dispatcher는 `DATABASE_CONNECTION_URL`로 valuation outbox에, `TRADING_DATABASE_CONNECTION_URL`(미설정 시 전자와 동일한 값)로 trading outbox에 연결합니다.
 
+> **향후 분리:** 이 HTTP endpoint와 포트폴리오 알림은 현재 운영 편의를 위한 임시 경계입니다. `trading-engine`은 안정적인 주문 검증·실행에만 집중해야 하므로, 조회 트래픽 또는 알림 처리량이 주문 경로에 영향을 주기 전에 portfolio/account 서비스로 분리합니다.
+
 평가 엔진은 `market_data.observations`에서 `DGS10`, `T10YIE`, `DFII10`, `DGS2`, `DGS3MO`, `CPIAUCSL`, `A191RL1Q225SBEA`, `ACM_TERM_PREMIUM`, `HLW_R_STAR` 시계열을 읽습니다. 마지막 두 NY Fed 데이터셋은 data-collector activity가 공식 소스를 정규화해 해당 series 이름으로 upsert합니다. valuation 요청 경로에서는 NY Fed 원본을 다시 내려받거나 파싱하지 않습니다.
 
 ## Data collector / Temporal
