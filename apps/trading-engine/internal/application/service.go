@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/yhc/quant-engine-go/apps/trading-engine/internal/domain"
+	tradingdomain "github.com/yhc/quant-engine-go/domains/trading/domain"
 )
 
 // Repository is owned by trading-engine. No valuation or dispatcher table is read here.
@@ -16,10 +17,12 @@ type Repository interface {
 	Reschedule(context.Context, string, int, time.Time, string) error
 	MarkRejected(context.Context, string, string, time.Time) error
 	MarkUnknown(context.Context, string, string, time.Time) error
+	EnqueuePortfolioAlert(context.Context, tradingdomain.Portfolio) error
 }
 
 type Broker interface {
 	Submit(context.Context, domain.Intent) (string, error)
+	Portfolio(context.Context) (tradingdomain.Portfolio, error)
 }
 
 type Service struct {
@@ -44,6 +47,29 @@ func (s Service) SubmitOrderIntent(ctx context.Context, intent domain.Intent) (d
 		return domain.Order{}, false, fmt.Errorf("durably accept order intent: %w", err)
 	}
 	return order, created, nil
+}
+
+// TradingBook returns the current supported equity holdings with each
+// position's value and weight converted to KRW at the current USD/KRW rate.
+func (s Service) TradingBook(ctx context.Context) (tradingdomain.Portfolio, error) {
+	book, err := s.broker.Portfolio(ctx)
+	if err != nil {
+		return tradingdomain.Portfolio{}, fmt.Errorf("retrieve trading book: %w", err)
+	}
+	return book, nil
+}
+
+// AlertCurrentPortfolio persists a portfolio snapshot for delivery by
+// alert-dispatcher. It deliberately does not call Slack inline.
+func (s Service) AlertCurrentPortfolio(ctx context.Context) (tradingdomain.Portfolio, error) {
+	book, err := s.TradingBook(ctx)
+	if err != nil {
+		return tradingdomain.Portfolio{}, err
+	}
+	if err := s.repository.EnqueuePortfolioAlert(ctx, book); err != nil {
+		return tradingdomain.Portfolio{}, fmt.Errorf("enqueue portfolio alert: %w", err)
+	}
+	return book, nil
 }
 
 // ProcessOne performs the final risk re-check immediately before the external order call.

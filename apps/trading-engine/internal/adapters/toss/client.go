@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/yhc/quant-engine-go/apps/trading-engine/internal/domain"
+	tradingdomain "github.com/yhc/quant-engine-go/domains/trading/domain"
 )
 
 const defaultBaseURL = "https://openapi.tossinvest.com"
@@ -80,8 +82,7 @@ func (c *Client) Submit(ctx context.Context, intent domain.Intent) (string, erro
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("X-Tossinvest-Account", strconv.FormatInt(c.config.AccountSeq, 10))
+	c.authorizeAccount(req, token)
 	req.Header.Set("Content-Type", "application/json")
 	response, err := c.http.Do(req)
 	if err != nil {
@@ -107,6 +108,201 @@ func (c *Client) Submit(ctx context.Context, intent domain.Intent) (string, erro
 		return "", fmt.Errorf("Toss order response did not include orderId")
 	}
 	return decoded.Result.OrderID, nil
+}
+
+// Portfolio retrieves every stock holding plus available cash buying power and
+// turns mixed KRW/USD values into a single KRW trading book. Toss does not
+// expose options or bonds through the holdings endpoint.
+func (c *Client) Portfolio(ctx context.Context) (tradingdomain.Portfolio, error) {
+	token, err := c.accessToken(ctx)
+	if err != nil {
+		return tradingdomain.Portfolio{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.config.BaseURL+"/api/v1/holdings", nil)
+	if err != nil {
+		return tradingdomain.Portfolio{}, err
+	}
+	c.authorizeAccount(req, token)
+	response, err := c.http.Do(req)
+	if err != nil {
+		return tradingdomain.Portfolio{}, temporary{fmt.Errorf("call Toss holdings API: %w", err)}
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return tradingdomain.Portfolio{}, temporary{fmt.Errorf("read Toss holdings response: %w", err)}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return tradingdomain.Portfolio{}, parseError(response.StatusCode, data)
+	}
+	var decoded holdingsResponse
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return tradingdomain.Portfolio{}, fmt.Errorf("decode Toss holdings response: %w", err)
+	}
+	return c.toPortfolio(ctx, token, decoded.Result)
+}
+
+func (c *Client) toPortfolio(ctx context.Context, token string, overview holdingsOverview) (tradingdomain.Portfolio, error) {
+	krwTotal, err := decimal(overview.MarketValue.Amount.KRW)
+	if err != nil {
+		return tradingdomain.Portfolio{}, fmt.Errorf("invalid KRW holdings total: %w", err)
+	}
+	usdTotal, err := nullableDecimal(overview.MarketValue.Amount.USD)
+	if err != nil {
+		return tradingdomain.Portfolio{}, fmt.Errorf("invalid USD holdings total: %w", err)
+	}
+	krwCash, err := c.cashBuyingPower(ctx, token, "KRW")
+	if err != nil {
+		return tradingdomain.Portfolio{}, err
+	}
+	usdCash, err := c.cashBuyingPower(ctx, token, "USD")
+	if err != nil {
+		return tradingdomain.Portfolio{}, err
+	}
+	book := tradingdomain.Portfolio{
+		AsOf:              time.Now().UTC(),
+		ReportingCurrency: "KRW",
+		Holdings:          make([]tradingdomain.Holding, 0, len(overview.Items)),
+		Cash:              make([]tradingdomain.Cash, 0, 2),
+	}
+	usdKRWRate := new(big.Rat)
+	if usdTotal.Sign() != 0 || usdCash.Sign() != 0 {
+		rate, err := c.usdKRWRate(ctx, token)
+		if err != nil {
+			return tradingdomain.Portfolio{}, err
+		}
+		usdKRWRate, err = decimal(rate)
+		if err != nil {
+			return tradingdomain.Portfolio{}, fmt.Errorf("invalid USD/KRW exchange rate: %w", err)
+		}
+		book.USDKRWRate = rate
+	}
+	totalKRW := new(big.Rat).Set(krwTotal)
+	totalKRW.Add(totalKRW, new(big.Rat).Mul(usdTotal, usdKRWRate))
+	totalKRW.Add(totalKRW, krwCash)
+	totalKRW.Add(totalKRW, new(big.Rat).Mul(usdCash, usdKRWRate))
+	book.TotalMarketValue = decimalString(totalKRW)
+	profitLoss, err := priceInKRW(overview.ProfitLoss.Amount, usdKRWRate)
+	if err != nil {
+		return tradingdomain.Portfolio{}, fmt.Errorf("invalid profit/loss total: %w", err)
+	}
+	dailyProfitLoss, err := priceInKRW(overview.DailyProfitLoss.Amount, usdKRWRate)
+	if err != nil {
+		return tradingdomain.Portfolio{}, fmt.Errorf("invalid daily profit/loss total: %w", err)
+	}
+	if totalKRW.Sign() != 0 {
+		book.ProfitLossRate = decimalString(new(big.Rat).Quo(profitLoss, totalKRW))
+		book.DailyProfitLossRate = decimalString(new(big.Rat).Quo(dailyProfitLoss, totalKRW))
+	}
+	for _, item := range overview.Items {
+		marketValue, err := decimal(item.MarketValue.Amount)
+		if err != nil {
+			return tradingdomain.Portfolio{}, fmt.Errorf("invalid market value for %s: %w", item.Symbol, err)
+		}
+		marketValueKRW := new(big.Rat).Set(marketValue)
+		switch item.Currency {
+		case "KRW":
+		case "USD":
+			marketValueKRW.Mul(marketValueKRW, usdKRWRate)
+		default:
+			return tradingdomain.Portfolio{}, fmt.Errorf("unsupported holding currency %q for %s", item.Currency, item.Symbol)
+		}
+		weight := new(big.Rat)
+		if totalKRW.Sign() != 0 {
+			weight.Quo(marketValueKRW, totalKRW)
+		}
+		book.Holdings = append(book.Holdings, tradingdomain.Holding{
+			Instrument:           item.MarketCountry + ":" + item.Symbol,
+			Symbol:               item.Symbol,
+			Name:                 item.Name,
+			MarketCountry:        item.MarketCountry,
+			Currency:             item.Currency,
+			Quantity:             item.Quantity,
+			LastPrice:            item.LastPrice,
+			AveragePurchasePrice: item.AveragePurchasePrice,
+			MarketValue:          item.MarketValue.Amount,
+			MarketValueAfterCost: item.MarketValue.AmountAfterCost,
+			ProfitLoss:           item.ProfitLoss.Amount,
+			ProfitLossRate:       item.ProfitLoss.Rate,
+			DailyProfitLoss:      item.DailyProfitLoss.Amount,
+			DailyProfitLossRate:  item.DailyProfitLoss.Rate,
+			MarketValueKRW:       decimalString(marketValueKRW),
+			Weight:               decimalString(weight),
+		})
+	}
+	book.Cash = append(book.Cash, cashPosition("KRW", krwCash, new(big.Rat), totalKRW))
+	book.Cash = append(book.Cash, cashPosition("USD", usdCash, usdKRWRate, totalKRW))
+	return book, nil
+}
+
+func (c *Client) cashBuyingPower(ctx context.Context, token, currency string) (*big.Rat, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.config.BaseURL+"/api/v1/buying-power?currency="+currency, nil)
+	if err != nil {
+		return nil, err
+	}
+	c.authorizeAccount(req, token)
+	response, err := c.http.Do(req)
+	if err != nil {
+		return nil, temporary{fmt.Errorf("call Toss %s buying-power API: %w", currency, err)}
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return nil, temporary{fmt.Errorf("read Toss %s buying-power response: %w", currency, err)}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, parseError(response.StatusCode, data)
+	}
+	var decoded struct {
+		Result struct {
+			CashBuyingPower string `json:"cashBuyingPower"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode Toss %s buying-power response: %w", currency, err)
+	}
+	value, err := decimal(decoded.Result.CashBuyingPower)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Toss %s buying power: %w", currency, err)
+	}
+	return value, nil
+}
+
+func (c *Client) usdKRWRate(ctx context.Context, token string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.config.BaseURL+"/api/v1/exchange-rate?baseCurrency=USD&quoteCurrency=KRW", nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := c.http.Do(req)
+	if err != nil {
+		return "", temporary{fmt.Errorf("call Toss exchange-rate API: %w", err)}
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return "", temporary{fmt.Errorf("read Toss exchange-rate response: %w", err)}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return "", parseError(response.StatusCode, data)
+	}
+	var decoded struct {
+		Result struct {
+			Rate string `json:"rate"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return "", fmt.Errorf("decode Toss exchange-rate response: %w", err)
+	}
+	if decoded.Result.Rate == "" {
+		return "", fmt.Errorf("Toss exchange-rate response did not include rate")
+	}
+	return decoded.Result.Rate, nil
+}
+
+func (c *Client) authorizeAccount(req *http.Request, token string) {
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("X-Tossinvest-Account", strconv.FormatInt(c.config.AccountSeq, 10))
 }
 
 type temporary struct{ error }
@@ -159,4 +355,93 @@ func parseError(status int, data []byte) error {
 	}
 	_ = json.Unmarshal(data, &decoded)
 	return apiError{Status: status, Code: decoded.Error.Code, Message: decoded.Error.Message}
+}
+
+type holdingsResponse struct {
+	Result holdingsOverview `json:"result"`
+}
+type holdingsOverview struct {
+	MarketValue struct {
+		Amount price `json:"amount"`
+	} `json:"marketValue"`
+	ProfitLoss struct {
+		Amount price `json:"amount"`
+	} `json:"profitLoss"`
+	DailyProfitLoss struct {
+		Amount price `json:"amount"`
+	} `json:"dailyProfitLoss"`
+	Items []holding `json:"items"`
+}
+type price struct {
+	KRW string  `json:"krw"`
+	USD *string `json:"usd"`
+}
+type holding struct {
+	Symbol               string `json:"symbol"`
+	Name                 string `json:"name"`
+	MarketCountry        string `json:"marketCountry"`
+	Currency             string `json:"currency"`
+	Quantity             string `json:"quantity"`
+	LastPrice            string `json:"lastPrice"`
+	AveragePurchasePrice string `json:"averagePurchasePrice"`
+	MarketValue          struct {
+		Amount          string `json:"amount"`
+		AmountAfterCost string `json:"amountAfterCost"`
+	} `json:"marketValue"`
+	ProfitLoss struct {
+		Amount string `json:"amount"`
+		Rate   string `json:"rate"`
+	} `json:"profitLoss"`
+	DailyProfitLoss struct {
+		Amount string `json:"amount"`
+		Rate   string `json:"rate"`
+	} `json:"dailyProfitLoss"`
+}
+
+func decimal(value string) (*big.Rat, error) {
+	if value == "" {
+		return nil, fmt.Errorf("empty decimal")
+	}
+	result, ok := new(big.Rat).SetString(value)
+	if !ok {
+		return nil, fmt.Errorf("%q is not a decimal", value)
+	}
+	return result, nil
+}
+func nullableDecimal(value *string) (*big.Rat, error) {
+	if value == nil {
+		return new(big.Rat), nil
+	}
+	return decimal(*value)
+}
+func priceInKRW(value price, usdKRWRate *big.Rat) (*big.Rat, error) {
+	krw, err := decimal(value.KRW)
+	if err != nil {
+		return nil, err
+	}
+	usd, err := nullableDecimal(value.USD)
+	if err != nil {
+		return nil, err
+	}
+	return new(big.Rat).Add(krw, new(big.Rat).Mul(usd, usdKRWRate)), nil
+}
+func decimalString(value *big.Rat) string {
+	text := value.FloatString(8)
+	text = strings.TrimRight(strings.TrimRight(text, "0"), ".")
+	if text == "" || text == "-0" {
+		return "0"
+	}
+	return text
+}
+
+func cashPosition(currency string, amount, exchangeRate, totalKRW *big.Rat) tradingdomain.Cash {
+	valueKRW := new(big.Rat).Set(amount)
+	if currency == "USD" {
+		valueKRW.Mul(valueKRW, exchangeRate)
+	}
+	weight := new(big.Rat)
+	if totalKRW.Sign() != 0 {
+		weight.Quo(valueKRW, totalKRW)
+	}
+	return tradingdomain.Cash{Currency: currency, BuyingPower: decimalString(amount), ValueKRW: decimalString(valueKRW), Weight: decimalString(weight)}
 }

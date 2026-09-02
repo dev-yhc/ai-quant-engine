@@ -5,13 +5,24 @@ package application
 import (
 	"context"
 	"fmt"
+	"math/big"
 	"strings"
 	"time"
+
+	tradingdomain "github.com/yhc/quant-engine-go/domains/trading/domain"
 )
 
 const (
 	AlertKindInformation = "INFORMATION"
 	AlertKindApproval    = "APPROVAL_REQUEST"
+	AlertKindPortfolio   = "PORTFOLIO_SNAPSHOT"
+)
+
+type AlertSource string
+
+const (
+	AlertSourceValuation AlertSource = "VALUATION"
+	AlertSourceTrading   AlertSource = "TRADING"
 )
 
 type SignalEvent struct {
@@ -36,10 +47,12 @@ type SignalOutboxItem struct {
 
 type Alert struct {
 	ID                int64
+	Source            AlertSource
 	Kind              string
 	Event             SignalEvent
 	ApprovalRequestID int64
 	ExpiresAt         time.Time
+	Portfolio         *tradingdomain.Portfolio
 }
 
 type Repository interface {
@@ -48,8 +61,8 @@ type Repository interface {
 	MarkSignalDelivered(context.Context, int64) error
 	MarkSignalRetry(context.Context, int64, error) error
 	ClaimAlert(context.Context) (Alert, bool, error)
-	MarkAlertDelivered(context.Context, int64) error
-	MarkAlertRetry(context.Context, int64, error) error
+	MarkAlertDelivered(context.Context, Alert) error
+	MarkAlertRetry(context.Context, Alert, error) error
 }
 
 type Sender interface {
@@ -95,12 +108,12 @@ func (d Dispatcher) RunOnce(ctx context.Context) error {
 			return nil
 		}
 		if err := d.sender.Send(ctx, alert); err != nil {
-			if retryErr := d.repository.MarkAlertRetry(ctx, alert.ID, err); retryErr != nil {
+			if retryErr := d.repository.MarkAlertRetry(ctx, alert, err); retryErr != nil {
 				return fmt.Errorf("send alert: %w; mark retry: %v", err, retryErr)
 			}
 			continue
 		}
-		if err := d.repository.MarkAlertDelivered(ctx, alert.ID); err != nil {
+		if err := d.repository.MarkAlertDelivered(ctx, alert); err != nil {
 			return fmt.Errorf("mark alert delivered: %w", err)
 		}
 	}
@@ -127,6 +140,9 @@ func (d Dispatcher) Run(ctx context.Context, pollInterval time.Duration) error {
 // SlackText produces a human-readable message. Approval messages identify a
 // durable request; they never claim that an order was created or approved.
 func SlackText(alert Alert) string {
+	if alert.Kind == AlertKindPortfolio && alert.Portfolio != nil {
+		return portfolioSlackText(*alert.Portfolio)
+	}
 	lines := []string{
 		fmt.Sprintf("*US Treasury 10Y valuation* — %s", alert.Kind),
 		fmt.Sprintf("Signal: *%s* | Z-score: %.2f", alert.Event.Signal, alert.Event.ZScore),
@@ -144,4 +160,41 @@ func SlackText(alert Alert) string {
 		lines = append(lines, "Informational only. No order action is requested.")
 	}
 	return strings.Join(lines, "\n")
+}
+
+func portfolioSlackText(book tradingdomain.Portfolio) string {
+	lines := []string{
+		"*Current trading book* — PORTFOLIO_SNAPSHOT",
+		fmt.Sprintf("As of: %s", book.AsOf.UTC().Format(time.RFC3339)),
+		fmt.Sprintf("Total market value: %s %s", book.ReportingCurrency, book.TotalMarketValue),
+	}
+	if book.USDKRWRate != "" {
+		lines = append(lines, "USD/KRW rate used: "+book.USDKRWRate)
+	}
+	lines = append(lines,
+		fmt.Sprintf("Total P/L: %s | Daily P/L: %s", percentage(book.ProfitLossRate), percentage(book.DailyProfitLossRate)),
+		fmt.Sprintf("Holdings: %d", len(book.Holdings)),
+	)
+	for _, holding := range book.Holdings {
+		name := holding.Name
+		if name != "" {
+			name = " (" + name + ")"
+		}
+		lines = append(lines, fmt.Sprintf("• %s%s: %s %s | %s KRW | weight %s", holding.Instrument, name, holding.Quantity, holding.Currency, holding.MarketValueKRW, percentage(holding.Weight)))
+	}
+	for _, cash := range book.Cash {
+		lines = append(lines, fmt.Sprintf("• Cash %s: %s | %s KRW | weight %s", cash.Currency, cash.BuyingPower, cash.ValueKRW, percentage(cash.Weight)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func percentage(value string) string {
+	if value == "" {
+		return "n/a"
+	}
+	ratio, ok := new(big.Rat).SetString(value)
+	if !ok {
+		return value
+	}
+	return strings.TrimRight(strings.TrimRight(new(big.Rat).Mul(ratio, big.NewRat(100, 1)).FloatString(2), "0"), ".") + "%"
 }

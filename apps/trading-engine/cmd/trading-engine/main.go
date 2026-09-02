@@ -48,6 +48,22 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 	router.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	router.GET("/v1/trading-book", func(c *gin.Context) {
+		book, err := service.TradingBook(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "trading book unavailable"})
+			return
+		}
+		c.JSON(http.StatusOK, book)
+	})
+	router.POST("/v1/trading-book/alerts", func(c *gin.Context) {
+		book, err := service.AlertCurrentPortfolio(c.Request.Context())
+		if err != nil {
+			c.JSON(http.StatusBadGateway, gin.H{"error": "portfolio alert unavailable"})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"status": "queued", "portfolio": book})
+	})
 	httpServer := &http.Server{Addr: envOr("TRADING_ENGINE_HTTP_ADDR", ":8082"), Handler: router}
 	go func() {
 		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {

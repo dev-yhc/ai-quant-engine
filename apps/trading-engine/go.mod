@@ -5,9 +5,12 @@ go 1.24.0
 require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/jackc/pgx/v5 v5.7.6
+	github.com/yhc/quant-engine-go/domains/trading v0.0.0
 	google.golang.org/grpc v1.76.0
 	google.golang.org/protobuf v1.36.10
 )
+
+replace github.com/yhc/quant-engine-go/domains/trading => ../../domains/trading
 
 require (
 	github.com/bytedance/sonic v1.11.6 // indirect

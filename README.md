@@ -64,6 +64,12 @@ go run ./apps/trading-engine/cmd/trading-engine
 
 `SubmitOrderIntent`의 struct payload는 `id`, `signal_event_id`, `approval_request_id`, `strategy`, `instrument` (`US:AAPL` 또는 `KR:005930`), `side`, `order_type`, `quantity` 또는 `order_amount`, `limit_price`, `idempotency_key`, `policy_version`, `mode`, `expires_at` (RFC3339)을 사용합니다.
 
+### Trading book / portfolio alerts
+
+`GET /v1/trading-book`은 Toss의 전체 보유 주식(KR·US)과 KRW/USD 즉시 매수 가능 현금을 조회하고, 현재 USD/KRW 환율로 원화 평가액과 자산별 전체 포트폴리오 비중(`weight`; 0~1)을 반환합니다. Toss의 보유자산 API 범위상 옵션·채권은 이 trading book에 포함되지 않습니다. USD 주식·현금이 모두 없으면 환율은 호출하지 않습니다.
+
+`POST /v1/trading-book/alerts`는 같은 현재 스냅샷을 반환하면서 `trading.portfolio_alert_outbox`에 durable alert를 적재합니다. `alert-dispatcher`가 이 outbox를 polling하여 Slack으로 종목별 원화 평가액과 비중을 보냅니다. 조회 GET은 알림을 만들지 않으므로 화면 갱신이 알림을 중복 발송하지 않습니다. dispatcher는 `DATABASE_CONNECTION_URL`로 valuation outbox에, `TRADING_DATABASE_CONNECTION_URL`(미설정 시 전자와 동일한 값)로 trading outbox에 연결합니다.
+
 평가 엔진은 `market_data.observations`에서 `DGS10`, `T10YIE`, `DFII10`, `DGS2`, `DGS3MO`, `CPIAUCSL`, `A191RL1Q225SBEA`, `ACM_TERM_PREMIUM`, `HLW_R_STAR` 시계열을 읽습니다. 마지막 두 NY Fed 데이터셋은 data-collector activity가 공식 소스를 정규화해 해당 series 이름으로 upsert합니다. valuation 요청 경로에서는 NY Fed 원본을 다시 내려받거나 파싱하지 않습니다.
 
 ## Data collector / Temporal

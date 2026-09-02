@@ -7,5 +7,6 @@ use (
 	./apps/trading-engine
 	./apps/valuation-engine
 	./domains/marketdata
+	./domains/trading
 	./domains/valuation
 )

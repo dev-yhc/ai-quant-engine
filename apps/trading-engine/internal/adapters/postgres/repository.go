@@ -3,6 +3,7 @@ package postgres
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/yhc/quant-engine-go/apps/trading-engine/internal/domain"
+	tradingdomain "github.com/yhc/quant-engine-go/domains/trading/domain"
 )
 
 type Repository struct{ pool *pgxpool.Pool }
@@ -75,6 +77,14 @@ func (r *Repository) MarkRejected(ctx context.Context, id, message string, now t
 }
 func (r *Repository) MarkUnknown(ctx context.Context, id, message string, now time.Time) error {
 	return r.transition(ctx, id, domain.Unknown, 0, now, message)
+}
+func (r *Repository) EnqueuePortfolioAlert(ctx context.Context, book tradingdomain.Portfolio) error {
+	payload, err := json.Marshal(book)
+	if err != nil {
+		return fmt.Errorf("encode portfolio alert: %w", err)
+	}
+	_, err = r.pool.Exec(ctx, `INSERT INTO trading.portfolio_alert_outbox (payload) VALUES ($1)`, payload)
+	return err
 }
 func (r *Repository) transition(ctx context.Context, id string, status domain.Status, attempt int, next time.Time, message string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE trading.orders SET status=$2, attempt_count=CASE WHEN $3=0 THEN attempt_count ELSE $3 END, next_attempt_at=$4, last_error=$5, updated_at=NOW() WHERE id=$1 AND status='PROCESSING'`, id, status, attempt, next, message)

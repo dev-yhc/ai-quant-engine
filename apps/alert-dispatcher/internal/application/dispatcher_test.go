@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	tradingdomain "github.com/yhc/quant-engine-go/domains/trading/domain"
 )
 
 type repositorySpy struct {
@@ -39,17 +41,32 @@ func (r *repositorySpy) ClaimAlert(context.Context) (Alert, bool, error) {
 	r.alerts = r.alerts[1:]
 	return alert, true, nil
 }
-func (r *repositorySpy) MarkAlertDelivered(_ context.Context, id int64) error {
-	r.deliveredAlerts = append(r.deliveredAlerts, id)
+func (r *repositorySpy) MarkAlertDelivered(_ context.Context, alert Alert) error {
+	r.deliveredAlerts = append(r.deliveredAlerts, alert.ID)
 	return nil
 }
-func (*repositorySpy) MarkAlertRetry(context.Context, int64, error) error { return nil }
+func (*repositorySpy) MarkAlertRetry(context.Context, Alert, error) error { return nil }
 
 type senderSpy struct{ alerts []Alert }
 
 func (s *senderSpy) Send(_ context.Context, alert Alert) error {
 	s.alerts = append(s.alerts, alert)
 	return nil
+}
+
+func TestPortfolioAlertContainsEachHoldingAndWeight(t *testing.T) {
+	book := tradingdomain.Portfolio{
+		AsOf:              time.Date(2026, 9, 2, 9, 0, 0, 0, time.UTC),
+		ReportingCurrency: "KRW",
+		TotalMarketValue:  "1000000",
+		Holdings: []tradingdomain.Holding{{
+			Instrument: "US:AAPL", Name: "Apple", Quantity: "1", Currency: "USD", MarketValueKRW: "700000", Weight: "0.7",
+		}},
+	}
+	text := SlackText(Alert{Kind: AlertKindPortfolio, Portfolio: &book})
+	if !contains(text, "US:AAPL") || !contains(text, "70%") || !contains(text, "1000000") {
+		t.Fatalf("portfolio Slack text: %q", text)
+	}
 }
 
 func TestRunOnceRoutesInformationAndApprovalAlerts(t *testing.T) {

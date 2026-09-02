@@ -17,7 +17,11 @@ import (
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	repository, err := postgres.New(ctx, os.Getenv("DATABASE_CONNECTION_URL"))
+	tradingDatabaseURL := os.Getenv("TRADING_DATABASE_CONNECTION_URL")
+	if tradingDatabaseURL == "" {
+		tradingDatabaseURL = os.Getenv("DATABASE_CONNECTION_URL")
+	}
+	repository, err := postgres.New(ctx, os.Getenv("DATABASE_CONNECTION_URL"), tradingDatabaseURL)
 	if err != nil {
 		log.Fatal(err)
 	}

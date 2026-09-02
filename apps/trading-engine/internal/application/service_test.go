@@ -7,9 +7,13 @@ import (
 	"time"
 
 	"github.com/yhc/quant-engine-go/apps/trading-engine/internal/domain"
+	tradingdomain "github.com/yhc/quant-engine-go/domains/trading/domain"
 )
 
-type memoryRepository struct{ order *domain.Order }
+type memoryRepository struct {
+	order  *domain.Order
+	alerts []tradingdomain.Portfolio
+}
 
 func (r *memoryRepository) Accept(_ context.Context, i domain.Intent, now time.Time) (domain.Order, bool, error) {
 	if r.order != nil {
@@ -47,13 +51,22 @@ func (r *memoryRepository) MarkUnknown(_ context.Context, _ string, message stri
 	r.order.LastError = message
 	return nil
 }
+func (r *memoryRepository) EnqueuePortfolioAlert(_ context.Context, book tradingdomain.Portfolio) error {
+	r.alerts = append(r.alerts, book)
+	return nil
+}
 
 type brokerStub struct {
-	id  string
-	err error
+	id        string
+	err       error
+	portfolio tradingdomain.Portfolio
+	bookErr   error
 }
 
 func (b brokerStub) Submit(context.Context, domain.Intent) (string, error) { return b.id, b.err }
+func (b brokerStub) Portfolio(context.Context) (tradingdomain.Portfolio, error) {
+	return b.portfolio, b.bookErr
+}
 func testPolicy() domain.RiskPolicy {
 	return domain.RiskPolicy{ExecutionEnabled: true, AutoExecutionEnabled: true, AllowedStrategies: map[string]struct{}{"valuation": {}}, AllowedInstruments: map[string]struct{}{"US:AAPL": {}}, MaxQuantity: "10"}
 }
@@ -101,5 +114,15 @@ func TestRetryDoesNotCreateSecondIntent(t *testing.T) {
 	_, err := s.ProcessOne(context.Background())
 	if err != nil || repo.order.Status != domain.Pending || repo.order.AttemptCount != 1 {
 		t.Fatalf("order: %#v %v", repo.order, err)
+	}
+}
+
+func TestAlertCurrentPortfolioQueuesSnapshot(t *testing.T) {
+	repository := &memoryRepository{}
+	want := tradingdomain.Portfolio{ReportingCurrency: "KRW", TotalMarketValue: "1000"}
+	service := New(repository, brokerStub{portfolio: want}, testPolicy())
+	got, err := service.AlertCurrentPortfolio(context.Background())
+	if err != nil || got.TotalMarketValue != "1000" || len(repository.alerts) != 1 {
+		t.Fatalf("alert portfolio: %#v alerts=%#v err=%v", got, repository.alerts, err)
 	}
 }
