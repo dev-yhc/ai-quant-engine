@@ -2,6 +2,11 @@
 
 Gin 기반의 새 Go 워크스페이스입니다. 기존 `quant-engine` 저장소와 독립적으로 구성되어 있으며 AI 서비스는 포함하지 않습니다.
 
+## 문서
+
+- [Architecture](docs/architecture.md): 서비스 경계, 데이터 흐름 및 설계 원칙
+- [Architecture Decision Records (ADR)](docs/adr.md): Google Drive에서 관리하는 주요 설계 결정 원문 링크
+
 ## 모듈 구조
 
 ```
@@ -63,6 +68,12 @@ go run ./apps/trading-engine/cmd/trading-engine
 ```
 
 `SubmitOrderIntent`의 struct payload는 `id`, `signal_event_id`, `approval_request_id`, `strategy`, `instrument` (`US:AAPL` 또는 `KR:005930`), `side`, `order_type`, `quantity` 또는 `order_amount`, `limit_price`, `idempotency_key`, `policy_version`, `mode`, `expires_at` (RFC3339)을 사용합니다.
+
+### US 10Y OVERVALUED → IEF 전략
+
+`trading.strategy_configs`에는 첫 자동 전략 `us10y-overvalued-ief`가 저장됩니다. `signal=OVERVALUED`이고 `z_score <= -0.5`이면 IEF의 목표 익스포저는 50만 원, `z_score <= -1.0`이면 100만 원입니다. 포트폴리오 비중 상한은 100%지만 절대 상한은 100만 원이며, 주문 한 건은 최대 50만 원입니다. KRW 목표 금액은 주문 직전 USD/KRW 환율로 환산되어 US 시장가 `order_amount`로 전달됩니다.
+
+`HandleSignal` gRPC는 `signal_event_id`, `strategy_id`, `evaluated_at`, `z_score`, `signal`, `model_version`, `as_of`를 받습니다. 같은 `(signal_event_id, strategy_id)`는 한 번만 결정·주문되며, 아직 체결되지 않은 같은 방향 주문도 현재 유효 익스포저에 포함합니다. 자동 주문은 기존과 같이 `TRADING_EXECUTION_ENABLED=true`, `TRADING_AUTO_EXECUTION_ENABLED=true`, `TRADING_ALLOWED_STRATEGIES=us10y-overvalued-ief`, `TRADING_ALLOWED_INSTRUMENTS=US:IEF` 및 risk gate를 모두 통과해야 합니다.
 
 ### Trading book / portfolio alerts
 

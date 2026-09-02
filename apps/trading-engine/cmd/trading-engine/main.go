@@ -16,7 +16,9 @@ import (
 	"github.com/yhc/quant-engine-go/apps/trading-engine/internal/adapters/postgres"
 	"github.com/yhc/quant-engine-go/apps/trading-engine/internal/adapters/toss"
 	"github.com/yhc/quant-engine-go/apps/trading-engine/internal/application"
+	strategyapp "github.com/yhc/quant-engine-go/apps/trading-engine/internal/application/strategy"
 	"github.com/yhc/quant-engine-go/apps/trading-engine/internal/domain"
+	strategydomain "github.com/yhc/quant-engine-go/apps/trading-engine/internal/domain/strategy"
 	tradinggrpc "github.com/yhc/quant-engine-go/apps/trading-engine/internal/grpc"
 	"google.golang.org/grpc"
 )
@@ -33,13 +35,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	service := application.New(repository, broker, riskPolicy())
+	policy := riskPolicy()
+	service := application.New(repository, broker, policy)
+	strategyService := strategyapp.New(repository, broker, policy, strategydomain.IEFOvervaluedV1())
 	listener, err := net.Listen("tcp", envOr("TRADING_ENGINE_GRPC_ADDR", ":9091"))
 	if err != nil {
 		log.Fatal(err)
 	}
 	grpcServer := grpc.NewServer()
-	tradinggrpc.Register(grpcServer, tradinggrpc.NewServer(service))
+	tradinggrpc.Register(grpcServer, tradinggrpc.NewServer(service, strategyService))
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
 			log.Printf("gRPC server stopped: %v", err)
