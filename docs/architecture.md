@@ -20,6 +20,14 @@ data-collector ──수집/적재──> shared PostgreSQL ──┘
 - 공유 DB의 변경 이력은 `supabase/migrations/`에서 관리한다. baseline은 `market_data.observations`와 `market_data.research_datasets`만 만들며 Supabase 전용 기능을 사용하지 않는다. 적용 방법은 `supabase/README.md`를 따른다.
 - `valuation-engine`은 `market_data.observations`의 시점별 관측값을 forward-fill로 정렬하되 미래 관측값은 사용하지 않는다.
 
+## 서비스 통신과 이벤트 확장
+
+현재 서비스 간의 요청/응답 통신은 내부 gRPC 계약으로 유지한다. 평가 조회, 주문 의도 제출처럼 호출자가 결과 또는 성공·실패를 즉시 알아야 하는 유스케이스에는 gRPC가 기본 선택이다. 외부 소비자에게는 `apps/api`만 HTTPS/HTTP 계약을 제공하고, 내부 gRPC 서비스는 사설 네트워크의 허용된 호출자에게만 노출한다.
+
+다만 하나의 시그널이 여러 자산군의 후속 전략, 주문 의도, 알림 등 독립적인 소비자에게 전파되어야 하는 경우에는 동기 RPC 체인을 늘리지 않는다. 이 영역은 이벤트 주도 아키텍처(EDA)로 확장할 수 있도록 `SignalEvent` 같은 사실 이벤트를 발행하고, 각 소비자가 자기 책임의 처리와 상태를 갖는 fan-out 구조를 사용한다. 알림도 같은 원칙을 따른다. 새 채널이나 수신자를 추가할 때 기존 시그널 생산자나 다른 소비자를 수정하지 않아야 한다.
+
+이벤트 브로커가 필요해지는 시점에는 영속 outbox와 발행 워커를 통해 이벤트를 전달한다. 이벤트에는 안정적인 ID, 발생 시각, 이벤트 유형·버전, 대상 자산군/전략의 식별자, correlation ID를 포함하고, 소비자는 at-least-once 전달을 전제로 멱등 처리한다. 순서 보장, 재시도, dead-letter 처리와 관측성은 브로커 선정 및 도입 시 함께 정의한다. 현재의 outbox 기반 alert 전달은 이 확장 경로의 초기 형태이며, 브로커·추상 계층은 실제 다수 소비자 요구가 생길 때 도입한다.
+
 ## 채권 평가 계약
 
 gRPC 메서드는 `CalculateUSTreasury10YearTheoreticalYield`이다. 응답은 `Date`, `Actual`, 세 개의 독립 Anchor, 동일가중 복합 `Anchor`, `RawDistance`, `Bias`, `Delta`, `DistanceStdDev`, `ZScore`, `Signal`을 포함한다. 필수 시계열 또는 정렬 가능한 과거 표본이 부족하면 gRPC `FailedPrecondition`을 반환하며 API는 HTTP `422`로 변환한다.
