@@ -69,6 +69,12 @@ go run ./apps/trading-engine/cmd/trading-engine
 
 `SubmitOrderIntent`의 struct payload는 `id`, `signal_event_id`, `approval_request_id`, `strategy`, `instrument` (`US:AAPL` 또는 `KR:005930`), `side`, `order_type`, `quantity` 또는 `order_amount`, `limit_price`, `idempotency_key`, `policy_version`, `mode`, `expires_at` (RFC3339)을 사용합니다.
 
+### US 10Y OVERVALUED → IEF 전략
+
+`trading.strategy_configs`에는 첫 자동 전략 `us10y-overvalued-ief`가 저장됩니다. `signal=OVERVALUED`이고 `z_score <= -0.5`이면 IEF의 목표 익스포저는 50만 원, `z_score <= -1.0`이면 100만 원입니다. 포트폴리오 비중 상한은 100%지만 절대 상한은 100만 원이며, 주문 한 건은 최대 50만 원입니다. KRW 목표 금액은 주문 직전 USD/KRW 환율로 환산되어 US 시장가 `order_amount`로 전달됩니다.
+
+`HandleSignal` gRPC는 `signal_event_id`, `strategy_id`, `evaluated_at`, `z_score`, `signal`, `model_version`, `as_of`를 받습니다. 같은 `(signal_event_id, strategy_id)`는 한 번만 결정·주문되며, 아직 체결되지 않은 같은 방향 주문도 현재 유효 익스포저에 포함합니다. 자동 주문은 기존과 같이 `TRADING_EXECUTION_ENABLED=true`, `TRADING_AUTO_EXECUTION_ENABLED=true`, `TRADING_ALLOWED_STRATEGIES=us10y-overvalued-ief`, `TRADING_ALLOWED_INSTRUMENTS=US:IEF` 및 risk gate를 모두 통과해야 합니다.
+
 ### Trading book / portfolio alerts
 
 `GET /v1/trading-book`은 Toss의 전체 보유 주식(KR·US)과 KRW/USD 즉시 매수 가능 현금을 조회하고, 현재 USD/KRW 환율로 원화 평가액과 자산별 전체 포트폴리오 비중(`weight`; 0~1)을 반환합니다. Toss의 보유자산 API 범위상 옵션·채권은 이 trading book에 포함되지 않습니다. USD 주식·현금이 모두 없으면 환율은 호출하지 않습니다.

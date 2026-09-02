@@ -142,6 +142,16 @@ func (c *Client) Portfolio(ctx context.Context) (tradingdomain.Portfolio, error)
 	return c.toPortfolio(ctx, token, decoded.Result)
 }
 
+// USDToKRWRate exposes the current conversion needed to turn a KRW-denominated
+// strategy target into Toss's US market-order amount.
+func (c *Client) USDToKRWRate(ctx context.Context) (string, error) {
+	token, err := c.accessToken(ctx)
+	if err != nil {
+		return "", err
+	}
+	return c.usdKRWRate(ctx, token)
+}
+
 func (c *Client) toPortfolio(ctx context.Context, token string, overview holdingsOverview) (tradingdomain.Portfolio, error) {
 	krwTotal, err := decimal(overview.MarketValue.Amount.KRW)
 	if err != nil {
