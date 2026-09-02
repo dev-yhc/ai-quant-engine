@@ -8,6 +8,7 @@ Gin 기반의 새 Go 워크스페이스입니다. 기존 `quant-engine` 저장�
 apps/
   api/                 # 외부 HTTP 접점; valuation-engine을 gRPC로 호출
   data_collector/      # 외부 시장·거시 데이터 수집기
+	trading-engine/      # 승인/자동 OrderIntent를 검증하고 Toss 주문으로 전달
   valuation-engine/    # 채권 평가용 내부 gRPC 서비스
 domains/
   marketdata/          # 공유 시장데이터 도메인: domain / application / adapters
@@ -39,6 +40,28 @@ go run ./apps/api/cmd/api
 `GET /health`, `GET /v1/bond-valuations/us-treasury/10-year/theoretical-yield`를 제공합니다.
 
 valuation-engine은 `DATABASE_CONNECTION_URL`로 공유 PostgreSQL에 연결합니다. `VALUATION_ENGINE_GRPC_ADDR`은 엔진의 gRPC 주소(엔진 기본 `:9090`, API 기본 `localhost:9090`)이며, `VALUATION_ENGINE_HTTP_ADDR`은 Gin health endpoint 주소(기본 `:8081`)입니다.
+
+## Trading engine / Toss 증권 주문
+
+`trading-engine`은 signal-dispatcher의 `SubmitOrderIntent` gRPC 호출만 받으며, valuation DB를 직접 읽지 않습니다. 요청을 `trading.orders`에 먼저 저장한 후 worker가 최종 risk gate를 다시 검사하고 Toss Open API로 주문을 전송합니다. `idempotency_key`는 엔진 DB에서 영구 중복 방지에 사용되고, Toss에는 이 키에서 결정적으로 만든 `clientOrderId`를 사용합니다. Toss의 10분 멱등성 윈도우가 지난 일시 오류는 재주문하지 않고 `UNKNOWN`으로 남겨 수동 확인이 필요합니다.
+
+처음에는 아래처럼 모두 명시적으로 설정하기 전까지 주문이 전송되지 않습니다. `TRADING_EXECUTION_ENABLED`의 기본값은 `false`이며, 자동신호는 별도로 `TRADING_AUTO_EXECUTION_ENABLED=true`가 필요합니다. 승인 주문은 `mode=APPROVED`와 `approval_request_id`가 있어야 합니다.
+
+```bash
+export TRADING_DATABASE_CONNECTION_URL="$DATABASE_CONNECTION_URL"
+export TOSS_CLIENT_ID='...'
+export TOSS_CLIENT_SECRET='...'
+export TOSS_ACCOUNT_SEQ=1
+export TRADING_EXECUTION_ENABLED=true
+export TRADING_AUTO_EXECUTION_ENABLED=false
+export TRADING_KILL_SWITCH=false
+export TRADING_ALLOWED_STRATEGIES=valuation
+export TRADING_ALLOWED_INSTRUMENTS=US:AAPL
+export TRADING_MAX_QUANTITY=1
+go run ./apps/trading-engine/cmd/trading-engine
+```
+
+`SubmitOrderIntent`의 struct payload는 `id`, `signal_event_id`, `approval_request_id`, `strategy`, `instrument` (`US:AAPL` 또는 `KR:005930`), `side`, `order_type`, `quantity` 또는 `order_amount`, `limit_price`, `idempotency_key`, `policy_version`, `mode`, `expires_at` (RFC3339)을 사용합니다.
 
 평가 엔진은 `market_data.observations`에서 `DGS10`, `T10YIE`, `DFII10`, `DGS2`, `DGS3MO`, `CPIAUCSL`, `A191RL1Q225SBEA`, `ACM_TERM_PREMIUM`, `HLW_R_STAR` 시계열을 읽습니다. 마지막 두 NY Fed 데이터셋은 data-collector activity가 공식 소스를 정규화해 해당 series 이름으로 upsert합니다. valuation 요청 경로에서는 NY Fed 원본을 다시 내려받거나 파싱하지 않습니다.
 
