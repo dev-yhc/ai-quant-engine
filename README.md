@@ -2,6 +2,11 @@
 
 Gin 기반의 새 Go 워크스페이스입니다. 기존 `quant-engine` 저장소와 독립적으로 구성되어 있으며 AI 서비스는 포함하지 않습니다.
 
+## 문서
+
+- [Architecture](docs/architecture.md): 서비스 경계, 데이터 흐름 및 설계 원칙
+- [Architecture Decision Records (ADR)](docs/adr.md): Google Drive에서 관리하는 주요 설계 결정 원문 링크
+
 ## 모듈 구조
 
 ```
