@@ -4,6 +4,7 @@ use (
 	./apps/alert-dispatcher
 	./apps/api
 	./apps/data_collector
+	./apps/trading-engine
 	./apps/valuation-engine
 	./domains/marketdata
 	./domains/valuation

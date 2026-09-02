@@ -1,0 +1,9 @@
+syntax = "proto3";
+package trading.v1;
+option go_package = "github.com/yhc/quant-engine-go/apps/trading-engine/internal/grpc";
+import "google/protobuf/struct.proto";
+// Fields: id, signal_event_id, approval_request_id, strategy, instrument
+// (US:AAPL or KR:005930), side, order_type, quantity or order_amount,
+// limit_price, idempotency_key, policy_version, mode (APPROVED or AUTO_SIGNAL),
+// expires_at (RFC3339).
+service TradingService { rpc SubmitOrderIntent(google.protobuf.Struct) returns (google.protobuf.Struct); }
