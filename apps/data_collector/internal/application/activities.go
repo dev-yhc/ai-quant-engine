@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	CollectFredValuationActivityName  = "collect-fred-valuation-data"
-	CollectNYFedValuationActivityName = "collect-ny-fed-valuation-data"
+	CollectFredValuationActivityName   = "collect-fred-valuation-data"
+	CollectNYFedValuationActivityName  = "collect-ny-fed-valuation-data"
+	EvaluateUS10YearSignalActivityName = "evaluate-us-10-year-signal"
 )
 
 var FredValuationSeries = []string{"DGS10", "T10YIE", "DFII10", "DGS2", "DGS3MO", "CPIAUCSL", "A191RL1Q225SBEA"}
@@ -25,9 +26,16 @@ type FredCollectionResult struct {
 // Activities supplies the adapters required by Temporal activity handlers.
 // Workflow code remains deterministic and never receives these dependencies.
 type Activities struct {
-	FredProvider  TimeSeriesProvider
-	NYFedProvider ResearchTimeSeriesProvider
-	Repository    MarketDataRepository
+	FredProvider    TimeSeriesProvider
+	NYFedProvider   ResearchTimeSeriesProvider
+	Repository      MarketDataRepository
+	SignalEvaluator SignalEvaluator
+}
+
+// SignalEvaluator starts the valuation-owned signal transaction after market
+// data collection is complete. It intentionally returns no trading command.
+type SignalEvaluator interface {
+	EvaluateAndEnqueueUS10YearSignal(context.Context) error
 }
 
 func (a Activities) CollectFredValuationData(ctx context.Context) (FredCollectionResult, error) {
@@ -36,6 +44,13 @@ func (a Activities) CollectFredValuationData(ctx context.Context) (FredCollectio
 
 func (a Activities) CollectNYFedValuationData(ctx context.Context) (NYFedCollectionResult, error) {
 	return CollectNYFedValuationData(ctx, a.NYFedProvider, a.Repository)
+}
+
+func (a Activities) EvaluateUS10YearSignal(ctx context.Context) error {
+	if a.SignalEvaluator == nil {
+		return fmt.Errorf("US 10-year signal evaluator is required")
+	}
+	return a.SignalEvaluator.EvaluateAndEnqueueUS10YearSignal(ctx)
 }
 
 // CollectFredValuationData is one independently retryable activity.

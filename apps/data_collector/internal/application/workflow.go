@@ -29,5 +29,8 @@ func CollectMarketDataWorkflow(ctx workflow.Context) error {
 	if err := workflow.ExecuteActivity(ctx, CollectFredValuationActivityName).Get(ctx, nil); err != nil {
 		return err
 	}
-	return workflow.ExecuteActivity(ctx, CollectNYFedValuationActivityName).Get(ctx, nil)
+	if err := workflow.ExecuteActivity(ctx, CollectNYFedValuationActivityName).Get(ctx, nil); err != nil {
+		return err
+	}
+	return workflow.ExecuteActivity(ctx, EvaluateUS10YearSignalActivityName).Get(ctx, nil)
 }

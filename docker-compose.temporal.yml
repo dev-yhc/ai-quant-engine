@@ -43,6 +43,18 @@ services:
     ports:
       - "8080:8080"
 
+  valuation-engine:
+    image: quant-engine-valuation-engine:local
+    build:
+      context: .
+      dockerfile: apps/valuation-engine/Dockerfile
+    env_file:
+      - ./apps/data_collector/.env
+    environment:
+      VALUATION_ENGINE_GRPC_ADDR: :9090
+    ports:
+      - "9090:9090"
+
   data-collector:
     image: quant-engine-data-collector:local
     build:
@@ -51,12 +63,15 @@ services:
     depends_on:
       temporal:
         condition: service_healthy
+      valuation-engine:
+        condition: service_started
     env_file:
       - ./apps/data_collector/.env
     environment:
       TEMPORAL_HOST_PORT: temporal:7233
       TEMPORAL_NAMESPACE: default
       TEMPORAL_TASK_QUEUE: data-collector
+      VALUATION_ENGINE_GRPC_ADDR: valuation-engine:9090
     restart: unless-stopped
 
   data-collector-schedule:
@@ -67,14 +82,26 @@ services:
     depends_on:
       temporal:
         condition: service_healthy
+      valuation-engine:
+        condition: service_started
     env_file:
       - ./apps/data_collector/.env
     environment:
       TEMPORAL_HOST_PORT: temporal:7233
       TEMPORAL_NAMESPACE: default
       TEMPORAL_TASK_QUEUE: data-collector
+      VALUATION_ENGINE_GRPC_ADDR: valuation-engine:9090
     entrypoint: ["/usr/local/bin/schedule-data-collector"]
     profiles: ["tools"]
+
+  alert-dispatcher:
+    image: quant-engine-alert-dispatcher:local
+    build:
+      context: .
+      dockerfile: apps/alert-dispatcher/Dockerfile
+    env_file:
+      - ./apps/data_collector/.env
+    profiles: ["alerts"]
 
 volumes:
   temporal-postgresql-data:

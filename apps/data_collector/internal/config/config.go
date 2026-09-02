@@ -18,6 +18,7 @@ type Config struct {
 	TemporalScheduleID       string
 	TemporalScheduleCron     string
 	TemporalScheduleTimeZone string
+	ValuationEngineGRPCAddr  string
 }
 
 // DotenvPath resolves the optional local configuration file used by commands.
@@ -71,8 +72,9 @@ func fromEnvironment() Config {
 		TemporalNamespace:        valueOrDefault("TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueue:        valueOrDefault("TEMPORAL_TASK_QUEUE", "data-collector"),
 		TemporalScheduleID:       valueOrDefault("TEMPORAL_SCHEDULE_ID", "market-data-collection"),
-		TemporalScheduleCron:     valueOrDefault("TEMPORAL_SCHEDULE_CRON", "0 6 * * 1-5"),
+		TemporalScheduleCron:     valueOrDefault("TEMPORAL_SCHEDULE_CRON", "0 23 * * *"),
 		TemporalScheduleTimeZone: valueOrDefault("TEMPORAL_SCHEDULE_TIME_ZONE", "Asia/Seoul"),
+		ValuationEngineGRPCAddr:  valueOrDefault("VALUATION_ENGINE_GRPC_ADDR", "localhost:9090"),
 	}
 }
 
