@@ -23,6 +23,7 @@ func (r *repositorySpy) ClaimSignal(context.Context) (SignalOutboxItem, bool, er
 	r.signals = r.signals[1:]
 	return item, true, nil
 }
+
 func (r *repositorySpy) RouteSignal(_ context.Context, item SignalOutboxItem) error {
 	r.routed = append(r.routed, item)
 	r.alerts = append(r.alerts, Alert{ID: 1, Kind: AlertKindInformation, Event: item.Event})
@@ -31,8 +32,11 @@ func (r *repositorySpy) RouteSignal(_ context.Context, item SignalOutboxItem) er
 	}
 	return nil
 }
+
 func (*repositorySpy) MarkSignalDelivered(context.Context, int64) error    { return nil }
+
 func (*repositorySpy) MarkSignalRetry(context.Context, int64, error) error { return nil }
+
 func (r *repositorySpy) ClaimAlert(context.Context) (Alert, bool, error) {
 	if len(r.alerts) == 0 {
 		return Alert{}, false, nil
@@ -41,10 +45,12 @@ func (r *repositorySpy) ClaimAlert(context.Context) (Alert, bool, error) {
 	r.alerts = r.alerts[1:]
 	return alert, true, nil
 }
+
 func (r *repositorySpy) MarkAlertDelivered(_ context.Context, alert Alert) error {
 	r.deliveredAlerts = append(r.deliveredAlerts, alert.ID)
 	return nil
 }
+
 func (*repositorySpy) MarkAlertRetry(context.Context, Alert, error) error { return nil }
 
 type senderSpy struct{ alerts []Alert }
@@ -89,6 +95,7 @@ func TestRunOnceRoutesInformationAndApprovalAlerts(t *testing.T) {
 func contains(text, fragment string) bool {
 	return len(text) >= len(fragment) && (text == fragment || stringContains(text, fragment))
 }
+
 func stringContains(text, fragment string) bool {
 	for i := 0; i+len(fragment) <= len(text); i++ {
 		if text[i:i+len(fragment)] == fragment {

@@ -30,6 +30,7 @@ func New(ctx context.Context, connectionURL string) (*Repository, error) {
 	}
 	return &Repository{pool: pool}, nil
 }
+
 func (r *Repository) Close() { r.pool.Close() }
 
 func (r *Repository) Accept(ctx context.Context, i domain.Intent, now time.Time) (domain.Order, bool, error) {
@@ -47,9 +48,11 @@ ON CONFLICT (idempotency_key) DO NOTHING RETURNING `+orderColumns,
 	o, err = r.findByKey(ctx, i.IdempotencyKey)
 	return o, false, err
 }
+
 func (r *Repository) findByKey(ctx context.Context, key string) (domain.Order, error) {
 	return scanOrder(r.pool.QueryRow(ctx, `SELECT `+orderColumns+` FROM trading.orders WHERE idempotency_key=$1`, key))
 }
+
 func (r *Repository) ClaimNext(ctx context.Context, now time.Time) (domain.Order, bool, error) {
 	row := r.pool.QueryRow(ctx, `WITH candidate AS (SELECT id FROM trading.orders WHERE status='PENDING' AND next_attempt_at <= $1 ORDER BY next_attempt_at FOR UPDATE SKIP LOCKED LIMIT 1)
 UPDATE trading.orders o SET status='PROCESSING', updated_at=$1 FROM candidate WHERE o.id=candidate.id RETURNING `+orderColumns, now)
@@ -59,6 +62,7 @@ UPDATE trading.orders o SET status='PROCESSING', updated_at=$1 FROM candidate WH
 	}
 	return o, err == nil, err
 }
+
 func (r *Repository) MarkSubmitted(ctx context.Context, id, brokerID string, now time.Time) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE trading.orders SET status='SUBMITTED', broker_order_id=$2, submitted_at=$3, updated_at=$3, last_error=NULL WHERE id=$1 AND status='PROCESSING'`, id, brokerID, now)
 	if err != nil {
@@ -69,15 +73,19 @@ func (r *Repository) MarkSubmitted(ctx context.Context, id, brokerID string, now
 	}
 	return nil
 }
+
 func (r *Repository) Reschedule(ctx context.Context, id string, attempt int, next time.Time, message string) error {
 	return r.transition(ctx, id, domain.Pending, attempt, next, message)
 }
+
 func (r *Repository) MarkRejected(ctx context.Context, id, message string, now time.Time) error {
 	return r.transition(ctx, id, domain.Rejected, 0, now, message)
 }
+
 func (r *Repository) MarkUnknown(ctx context.Context, id, message string, now time.Time) error {
 	return r.transition(ctx, id, domain.Unknown, 0, now, message)
 }
+
 func (r *Repository) EnqueuePortfolioAlert(ctx context.Context, book tradingdomain.Portfolio) error {
 	payload, err := json.Marshal(book)
 	if err != nil {
@@ -86,6 +94,7 @@ func (r *Repository) EnqueuePortfolioAlert(ctx context.Context, book tradingdoma
 	_, err = r.pool.Exec(ctx, `INSERT INTO trading.portfolio_alert_outbox (payload) VALUES ($1)`, payload)
 	return err
 }
+
 func (r *Repository) transition(ctx context.Context, id string, status domain.Status, attempt int, next time.Time, message string) error {
 	tag, err := r.pool.Exec(ctx, `UPDATE trading.orders SET status=$2, attempt_count=CASE WHEN $3=0 THEN attempt_count ELSE $3 END, next_attempt_at=$4, last_error=$5, updated_at=NOW() WHERE id=$1 AND status='PROCESSING'`, id, status, attempt, next, message)
 	if err != nil {

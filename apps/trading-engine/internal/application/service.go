@@ -97,6 +97,7 @@ func (s Service) ProcessOne(ctx context.Context) (bool, error) {
 type Retryable interface{ Retryable() bool }
 
 func retryable(err error) bool { r, ok := err.(Retryable); return ok && r.Retryable() }
+
 func retryDelay(attempt int) time.Duration {
 	if attempt > 5 {
 		attempt = 5

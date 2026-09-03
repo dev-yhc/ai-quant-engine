@@ -38,6 +38,14 @@ go work sync
 go run ./apps/api/cmd/api
 ```
 
+## Lint
+
+Go 파일의 인접한 최상위 함수 선언 사이에는 빈 줄을 하나 둡니다. 저장소 제약 검사는 `scripts/lint/`에 모으며, 아래 명령은 CI에서도 실행합니다.
+
+```bash
+python3 scripts/lint/check_function_spacing.py
+```
+
 `GET /health`, `GET /v1/bond-valuations/us-treasury/10-year/theoretical-yield`를 제공합니다.
 
 valuation-engine은 `DATABASE_CONNECTION_URL`로 공유 PostgreSQL에 연결합니다. `VALUATION_ENGINE_GRPC_ADDR`은 엔진의 gRPC 주소(엔진 기본 `:9090`, API 기본 `localhost:9090`)이며, `VALUATION_ENGINE_HTTP_ADDR`은 Gin health endpoint 주소(기본 `:8081`)입니다.

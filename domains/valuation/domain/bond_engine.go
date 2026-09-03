@@ -139,6 +139,7 @@ func (s *onlineVariance) Add(value float64) {
 	s.mean += delta / float64(s.count)
 	s.m2 += delta * (value - s.mean)
 }
+
 func (s onlineVariance) Variance() float64 {
 	if s.count < 2 {
 		return 0
@@ -194,6 +195,7 @@ func dot(left, right [regressionFeatureCount]float64) float64 {
 	}
 	return result
 }
+
 func meanAndStdDev(values []float64) (float64, float64) {
 	mean := 0.0
 	for _, v := range values {
@@ -207,6 +209,7 @@ func meanAndStdDev(values []float64) (float64, float64) {
 	}
 	return mean, math.Sqrt(variance / float64(len(values)))
 }
+
 func valuationSignal(zScore float64) string {
 	if zScore > 0 {
 		return "UNDERVALUED"

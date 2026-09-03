@@ -57,6 +57,7 @@ type apiError struct {
 func (e apiError) Error() string {
 	return fmt.Sprintf("toss API status=%d code=%s: %s", e.Status, e.Code, e.Message)
 }
+
 func (e apiError) Retryable() bool { return e.Status == 409 || e.Status == 429 || e.Status >= 500 }
 
 func (c *Client) Submit(ctx context.Context, intent domain.Intent) (string, error) {
@@ -308,6 +309,7 @@ func (c *Client) authorizeAccount(req *http.Request, token string) {
 type temporary struct{ error }
 
 func (temporary) Retryable() bool { return true }
+
 func (c *Client) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -346,6 +348,7 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	c.tokenExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	return c.token, nil
 }
+
 func parseError(status int, data []byte) error {
 	var decoded struct {
 		Error struct {
@@ -408,12 +411,14 @@ func decimal(value string) (*big.Rat, error) {
 	}
 	return result, nil
 }
+
 func nullableDecimal(value *string) (*big.Rat, error) {
 	if value == nil {
 		return new(big.Rat), nil
 	}
 	return decimal(*value)
 }
+
 func priceInKRW(value price, usdKRWRate *big.Rat) (*big.Rat, error) {
 	krw, err := decimal(value.KRW)
 	if err != nil {
@@ -425,6 +430,7 @@ func priceInKRW(value price, usdKRWRate *big.Rat) (*big.Rat, error) {
 	}
 	return new(big.Rat).Add(krw, new(big.Rat).Mul(usd, usdKRWRate)), nil
 }
+
 func decimalString(value *big.Rat) string {
 	text := value.FloatString(8)
 	text = strings.TrimRight(strings.TrimRight(text, "0"), ".")
