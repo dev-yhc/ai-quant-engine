@@ -187,7 +187,9 @@ func stableID(prefix, signalID, strategyID string) string {
 	sum := sha256.Sum256([]byte(strategyID + "\x00" + signalID))
 	return prefix + "-" + hex.EncodeToString(sum[:12])
 }
+
 func decisionID(signalID, strategyID string) string {
 	return stableID("decision", signalID, strategyID)
 }
+
 func orderID(signalID, strategyID string) string { return stableID("order", signalID, strategyID) }

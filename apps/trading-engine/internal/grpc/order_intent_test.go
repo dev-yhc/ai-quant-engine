@@ -23,13 +23,16 @@ type strategyRepoStub struct {
 func (r *strategyRepoStub) LoadPolicy(context.Context, string) (strategydomain.LadderPolicy, error) {
 	return r.policy, nil
 }
+
 func (r *strategyRepoStub) FindDecision(_ context.Context, eventID, strategyID string) (strategyapp.Decision, bool, error) {
 	decision, ok := r.decisions[eventID+":"+strategyID]
 	return decision, ok, nil
 }
+
 func (r *strategyRepoStub) PendingExposure(context.Context, string, string) (strategydomain.Exposure, error) {
 	return r.pending, nil
 }
+
 func (r *strategyRepoStub) SaveDecisionAndOrder(_ context.Context, d strategyapp.Decision, order *orderdomain.Intent, _ time.Time) (strategyapp.Decision, bool, error) {
 	key := d.SignalEventID + ":" + d.StrategyID
 	if prior, ok := r.decisions[key]; ok {
@@ -47,6 +50,7 @@ type strategyPortfolioStub struct{ book tradingdomain.Portfolio }
 func (p strategyPortfolioStub) Portfolio(context.Context) (tradingdomain.Portfolio, error) {
 	return p.book, nil
 }
+
 func (p strategyPortfolioStub) USDToKRWRate(context.Context) (string, error) { return "1250", nil }
 
 func TestHandleSignalGRPCPlansTwoIEFOrders(t *testing.T) {

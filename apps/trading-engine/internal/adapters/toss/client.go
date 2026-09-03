@@ -57,6 +57,7 @@ type apiError struct {
 func (e apiError) Error() string {
 	return fmt.Sprintf("toss API status=%d code=%s: %s", e.Status, e.Code, e.Message)
 }
+
 func (e apiError) Retryable() bool { return e.Status == 409 || e.Status == 429 || e.Status >= 500 }
 
 func (c *Client) Submit(ctx context.Context, intent domain.Intent) (string, error) {
@@ -108,6 +109,158 @@ func (c *Client) Submit(ctx context.Context, intent domain.Intent) (string, erro
 		return "", fmt.Errorf("Toss order response did not include orderId")
 	}
 	return decoded.Result.OrderID, nil
+}
+
+// MarketSnapshot returns a REST baseline for one instrument. Realtime clients
+// call this before subscribing and after reconnecting because Toss WebSocket
+// channels only publish subsequent updates.
+func (c *Client) MarketSnapshot(ctx context.Context, instrument string) (MarketSnapshot, error) {
+	_, symbol, err := instrumentParts(instrument)
+	if err != nil {
+		return MarketSnapshot{}, err
+	}
+	token, err := c.accessToken(ctx)
+	if err != nil {
+		return MarketSnapshot{}, err
+	}
+	book, err := c.marketOrderbook(ctx, token, symbol)
+	if err != nil {
+		return MarketSnapshot{}, err
+	}
+	trades, err := c.marketTrades(ctx, token, symbol)
+	if err != nil {
+		return MarketSnapshot{}, err
+	}
+	return MarketSnapshot{Instrument: instrument, Timestamp: book.Timestamp.Time, ReceivedAt: time.Now().UTC(), Currency: book.Currency, Asks: book.Asks, Bids: book.Bids, Trades: trades}, nil
+}
+
+// CurrentDayOrders reconciles account order states after a WebSocket
+// reconnect. The personal-order stream is lossless only while a connection is
+// alive, so both live and today's closed orders are fetched before resuming it.
+func (c *Client) CurrentDayOrders(ctx context.Context) ([]OrderState, error) {
+	token, err := c.accessToken(ctx)
+	if err != nil {
+		return nil, err
+	}
+	open, err := c.orders(ctx, token, "OPEN", "")
+	if err != nil {
+		return nil, err
+	}
+	kst := time.FixedZone("KST", 9*60*60)
+	closed, err := c.orders(ctx, token, "CLOSED", time.Now().In(kst).Format(time.DateOnly))
+	if err != nil {
+		return nil, err
+	}
+	return append(open, closed...), nil
+}
+
+func (c *Client) orders(ctx context.Context, token, status, from string) ([]OrderState, error) {
+	result := []OrderState{}
+	cursor := ""
+	for {
+		query := url.Values{"status": {status}}
+		if from != "" {
+			query.Set("from", from)
+		}
+		if cursor != "" {
+			query.Set("cursor", cursor)
+		}
+		if status == "CLOSED" {
+			query.Set("limit", "100")
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.config.BaseURL+"/api/v1/orders?"+query.Encode(), nil)
+		if err != nil {
+			return nil, err
+		}
+		c.authorizeAccount(req, token)
+		response, err := c.http.Do(req)
+		if err != nil {
+			return nil, temporary{fmt.Errorf("call Toss order history API: %w", err)}
+		}
+		data, readErr := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		response.Body.Close()
+		if readErr != nil {
+			return nil, temporary{fmt.Errorf("read Toss order history response: %w", readErr)}
+		}
+		if response.StatusCode < 200 || response.StatusCode >= 300 {
+			return nil, parseError(response.StatusCode, data)
+		}
+		var decoded struct {
+			Result struct {
+				Orders     []OrderState `json:"orders"`
+				NextCursor *string      `json:"nextCursor"`
+				HasNext    bool         `json:"hasNext"`
+			} `json:"result"`
+		}
+		if err := json.Unmarshal(data, &decoded); err != nil {
+			return nil, fmt.Errorf("decode Toss order history response: %w", err)
+		}
+		result = append(result, decoded.Result.Orders...)
+		if !decoded.Result.HasNext || decoded.Result.NextCursor == nil || *decoded.Result.NextCursor == "" {
+			return result, nil
+		}
+		cursor = *decoded.Result.NextCursor
+	}
+}
+
+func (c *Client) marketOrderbook(ctx context.Context, token, symbol string) (orderbookPayload, error) {
+	requestURL := c.config.BaseURL + "/api/v1/orderbook?symbol=" + url.QueryEscape(symbol)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return orderbookPayload{}, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := c.http.Do(req)
+	if err != nil {
+		return orderbookPayload{}, temporary{fmt.Errorf("call Toss orderbook API: %w", err)}
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return orderbookPayload{}, temporary{fmt.Errorf("read Toss orderbook response: %w", err)}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return orderbookPayload{}, parseError(response.StatusCode, data)
+	}
+	var decoded struct {
+		Result orderbookPayload `json:"result"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return orderbookPayload{}, fmt.Errorf("decode Toss orderbook response: %w", err)
+	}
+	return decoded.Result, nil
+}
+
+func (c *Client) marketTrades(ctx context.Context, token, symbol string) ([]Trade, error) {
+	requestURL := c.config.BaseURL + "/api/v1/trades?symbol=" + url.QueryEscape(symbol) + "&count=50"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, requestURL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	response, err := c.http.Do(req)
+	if err != nil {
+		return nil, temporary{fmt.Errorf("call Toss trades API: %w", err)}
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+	if err != nil {
+		return nil, temporary{fmt.Errorf("read Toss trades response: %w", err)}
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, parseError(response.StatusCode, data)
+	}
+	var decoded struct {
+		Result []tradePayload `json:"result"`
+	}
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return nil, fmt.Errorf("decode Toss trades response: %w", err)
+	}
+	trades := make([]Trade, 0, len(decoded.Result))
+	for _, trade := range decoded.Result {
+		trades = append(trades, Trade{Price: trade.Price, Volume: trade.Volume, Timestamp: trade.Timestamp.Time, Currency: trade.Currency})
+	}
+	return trades, nil
 }
 
 // Portfolio retrieves every stock holding plus available cash buying power and
@@ -318,6 +471,7 @@ func (c *Client) authorizeAccount(req *http.Request, token string) {
 type temporary struct{ error }
 
 func (temporary) Retryable() bool { return true }
+
 func (c *Client) accessToken(ctx context.Context) (string, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -356,6 +510,7 @@ func (c *Client) accessToken(ctx context.Context) (string, error) {
 	c.tokenExpiresAt = time.Now().Add(time.Duration(token.ExpiresIn) * time.Second)
 	return c.token, nil
 }
+
 func parseError(status int, data []byte) error {
 	var decoded struct {
 		Error struct {
@@ -418,12 +573,14 @@ func decimal(value string) (*big.Rat, error) {
 	}
 	return result, nil
 }
+
 func nullableDecimal(value *string) (*big.Rat, error) {
 	if value == nil {
 		return new(big.Rat), nil
 	}
 	return decimal(*value)
 }
+
 func priceInKRW(value price, usdKRWRate *big.Rat) (*big.Rat, error) {
 	krw, err := decimal(value.KRW)
 	if err != nil {
@@ -435,6 +592,7 @@ func priceInKRW(value price, usdKRWRate *big.Rat) (*big.Rat, error) {
 	}
 	return new(big.Rat).Add(krw, new(big.Rat).Mul(usd, usdKRWRate)), nil
 }
+
 func decimalString(value *big.Rat) string {
 	text := value.FloatString(8)
 	text = strings.TrimRight(strings.TrimRight(text, "0"), ".")

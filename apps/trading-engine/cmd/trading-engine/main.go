@@ -38,6 +38,12 @@ func main() {
 	policy := riskPolicy()
 	service := application.New(repository, broker, policy)
 	strategyService := strategyapp.New(repository, broker, policy, strategydomain.IEFOvervaluedV1())
+	realtime := toss.NewRealtime(broker)
+	go func() {
+		if err := realtime.Run(ctx, allowedInstruments(policy)); err != nil && ctx.Err() == nil {
+			log.Printf("Toss realtime feed stopped: %v", err)
+		}
+	}()
 	listener, err := net.Listen("tcp", envOr("TRADING_ENGINE_GRPC_ADDR", ":9091"))
 	if err != nil {
 		log.Fatal(err)
@@ -52,6 +58,34 @@ func main() {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
 	router.GET("/health", func(c *gin.Context) { c.JSON(http.StatusOK, gin.H{"status": "ok"}) })
+	router.GET("/v1/market/:market/:symbol", func(c *gin.Context) {
+		instrument := strings.ToUpper(c.Param("market")) + ":" + strings.ToUpper(c.Param("symbol"))
+		snapshot, ok := realtime.Snapshot(instrument)
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "market snapshot unavailable", "lastRealtimeError": realtime.LastError()})
+			return
+		}
+		bestBid, hasBid := snapshot.BestBid()
+		bestAsk, hasAsk := snapshot.BestAsk()
+		response := gin.H{"snapshot": snapshot}
+		if hasBid {
+			response["buyLimitPrice"] = bestBid.Price
+			response["bestBid"] = bestBid
+		}
+		if hasAsk {
+			response["sellLimitPrice"] = bestAsk.Price
+			response["bestAsk"] = bestAsk
+		}
+		c.JSON(http.StatusOK, response)
+	})
+	router.GET("/v1/broker-orders/:orderID", func(c *gin.Context) {
+		event, ok := realtime.Order(c.Param("orderID"))
+		if !ok {
+			c.JSON(http.StatusNotFound, gin.H{"error": "broker order event unavailable", "lastRealtimeError": realtime.LastError()})
+			return
+		}
+		c.JSON(http.StatusOK, event)
+	})
 	router.GET("/v1/trading-book", func(c *gin.Context) {
 		book, err := service.TradingBook(c.Request.Context())
 		if err != nil {
@@ -83,6 +117,7 @@ func main() {
 		log.Printf("shutdown health server: %v", err)
 	}
 }
+
 func worker(ctx context.Context, service application.Service) {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -104,9 +139,11 @@ func worker(ctx context.Context, service application.Service) {
 		}
 	}
 }
+
 func riskPolicy() domain.RiskPolicy {
 	return domain.RiskPolicy{ExecutionEnabled: boolValue("TRADING_EXECUTION_ENABLED"), AutoExecutionEnabled: boolValue("TRADING_AUTO_EXECUTION_ENABLED"), KillSwitch: boolValue("TRADING_KILL_SWITCH"), AllowedStrategies: allowed(os.Getenv("TRADING_ALLOWED_STRATEGIES")), AllowedInstruments: allowed(os.Getenv("TRADING_ALLOWED_INSTRUMENTS")), MaxQuantity: os.Getenv("TRADING_MAX_QUANTITY"), MaxOrderAmount: os.Getenv("TRADING_MAX_ORDER_AMOUNT")}
 }
+
 func allowed(value string) map[string]struct{} {
 	result := map[string]struct{}{}
 	for _, v := range strings.Split(value, ",") {
@@ -116,13 +153,24 @@ func allowed(value string) map[string]struct{} {
 	}
 	return result
 }
+
+func allowedInstruments(policy domain.RiskPolicy) []string {
+	result := make([]string, 0, len(policy.AllowedInstruments))
+	for instrument := range policy.AllowedInstruments {
+		result = append(result, instrument)
+	}
+	return result
+}
+
 func envOr(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
 	}
 	return fallback
 }
+
 func boolValue(key string) bool { return strings.EqualFold(os.Getenv(key), "true") }
+
 func int64Value(key string) int64 {
 	var result int64
 	_, _ = fmt.Sscan(os.Getenv(key), &result)

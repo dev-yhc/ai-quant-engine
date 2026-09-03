@@ -19,6 +19,7 @@ type Client struct {
 func New(connection grpc.ClientConnInterface, timeout time.Duration) Client {
 	return Client{connection: connection, timeout: timeout}
 }
+
 func (c Client) SubmitOrderIntent(ctx context.Context, intent map[string]any) (map[string]any, error) {
 	request, err := structpb.NewStruct(intent)
 	if err != nil {
@@ -32,6 +33,7 @@ func (c Client) SubmitOrderIntent(ctx context.Context, intent map[string]any) (m
 	}
 	return response.AsMap(), nil
 }
+
 func (c Client) HandleSignal(ctx context.Context, signal map[string]any) (map[string]any, error) {
 	request, err := structpb.NewStruct(signal)
 	if err != nil {

@@ -30,6 +30,7 @@ type Server struct {
 func NewServer(application application.Service, strategyApplication strategyapp.Service) *Server {
 	return &Server{application: application, strategyApplication: strategyApplication}
 }
+
 func (s *Server) SubmitOrderIntent(ctx context.Context, request *structpb.Struct) (*structpb.Struct, error) {
 	intent, err := intentFromMap(request.AsMap())
 	if err != nil {
@@ -41,6 +42,7 @@ func (s *Server) SubmitOrderIntent(ctx context.Context, request *structpb.Struct
 	}
 	return structpb.NewStruct(map[string]any{"order_intent_id": order.ID, "status": string(order.Status), "created": created, "broker_client_order_id": order.BrokerClientOrderID})
 }
+
 func (s *Server) HandleSignal(ctx context.Context, request *structpb.Struct) (*structpb.Struct, error) {
 	event, err := signalFromMap(request.AsMap())
 	if err != nil {
@@ -58,9 +60,11 @@ func (s *Server) HandleSignal(ctx context.Context, request *structpb.Struct) (*s
 		"order_intent_id": d.OrderID, "reason": d.Reason,
 	})
 }
+
 func Register(server grpc.ServiceRegistrar, service TradingService) {
 	server.RegisterService(&grpc.ServiceDesc{ServiceName: "trading.v1.TradingService", HandlerType: (*TradingService)(nil), Methods: []grpc.MethodDesc{{MethodName: "SubmitOrderIntent", Handler: submitHandler}, {MethodName: "HandleSignal", Handler: signalHandler}}}, service)
 }
+
 func signalHandler(srv any, ctx context.Context, decode func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	in := new(structpb.Struct)
 	if err := decode(in); err != nil {
@@ -73,6 +77,7 @@ func signalHandler(srv any, ctx context.Context, decode func(any) error, interce
 		return srv.(TradingService).HandleSignal(ctx, request.(*structpb.Struct))
 	})
 }
+
 func submitHandler(srv any, ctx context.Context, decode func(any) error, interceptor grpc.UnaryServerInterceptor) (any, error) {
 	in := new(structpb.Struct)
 	if err := decode(in); err != nil {
@@ -85,6 +90,7 @@ func submitHandler(srv any, ctx context.Context, decode func(any) error, interce
 		return srv.(TradingService).SubmitOrderIntent(ctx, request.(*structpb.Struct))
 	})
 }
+
 func intentFromMap(m map[string]any) (domain.Intent, error) {
 	expiresAt, err := time.Parse(time.RFC3339, stringValue(m, "expires_at"))
 	if err != nil {
@@ -92,6 +98,7 @@ func intentFromMap(m map[string]any) (domain.Intent, error) {
 	}
 	return domain.Intent{ID: stringValue(m, "id"), SignalEventID: stringValue(m, "signal_event_id"), ApprovalRequestID: stringValue(m, "approval_request_id"), Strategy: stringValue(m, "strategy"), Instrument: stringValue(m, "instrument"), Side: domain.Side(stringValue(m, "side")), OrderType: domain.OrderType(stringValue(m, "order_type")), Quantity: stringValue(m, "quantity"), OrderAmount: stringValue(m, "order_amount"), LimitPrice: stringValue(m, "limit_price"), IdempotencyKey: stringValue(m, "idempotency_key"), PolicyVersion: stringValue(m, "policy_version"), Mode: domain.ExecutionMode(stringValue(m, "mode")), ExpiresAt: expiresAt}, nil
 }
+
 func signalFromMap(m map[string]any) (strategydomain.SignalEvent, error) {
 	evaluatedAt, err := time.Parse(time.RFC3339, stringValue(m, "evaluated_at"))
 	if err != nil {
@@ -107,4 +114,5 @@ func signalFromMap(m map[string]any) (strategydomain.SignalEvent, error) {
 	}
 	return event, nil
 }
+
 func stringValue(m map[string]any, key string) string { v, _ := m[key].(string); return v }

@@ -42,6 +42,44 @@ func TestSubmitUsesOAuthAccountHeaderAndClientOrderID(t *testing.T) {
 	}
 }
 
+func TestMarketSnapshotUsesRESTBaselineAndSelectsInsideQuotes(t *testing.T) {
+	client, err := New(Config{ClientID: "id", ClientSecret: "secret", AccountSeq: 7, BaseURL: "https://example.test", HTTPClient: &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
+		switch request.URL.Path {
+		case "/oauth2/token":
+			return response(200, `{"access_token":"token","expires_in":3600}`), nil
+		case "/api/v1/orderbook":
+			if request.Header.Get("Authorization") != "Bearer token" || request.URL.Query().Get("symbol") != "005930" {
+				t.Fatalf("orderbook request: %s headers=%v", request.URL, request.Header)
+			}
+			return response(200, `{"result":{"timestamp":"2026-09-02T09:00:00+09:00","currency":"KRW","asks":[{"price":"70200","volume":"1"},{"price":"70100","volume":"2"}],"bids":[{"price":"69900","volume":"3"},{"price":"70000","volume":"4"}]}}`), nil
+		case "/api/v1/trades":
+			if request.Header.Get("Authorization") != "Bearer token" || request.URL.Query().Get("count") != "50" {
+				t.Fatalf("trades request: %s headers=%v", request.URL, request.Header)
+			}
+			return response(200, `{"result":[{"price":"70000","volume":"10","timestamp":"2026-09-02T09:00:01+09:00","currency":"KRW"}]}`), nil
+		default:
+			t.Fatalf("unexpected path: %s", request.URL.Path)
+			return nil, nil
+		}
+	})}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := client.MarketSnapshot(context.Background(), "KR:005930")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Instrument != "KR:005930" || len(snapshot.Trades) != 1 {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if bid, ok := snapshot.BestBid(); !ok || bid.Price != "70000" {
+		t.Fatalf("best bid = %#v, %v", bid, ok)
+	}
+	if ask, ok := snapshot.BestAsk(); !ok || ask.Price != "70100" {
+		t.Fatalf("best ask = %#v, %v", ask, ok)
+	}
+}
+
 func TestPortfolioReturnsAllHoldingsWithKRWWeights(t *testing.T) {
 	client, err := New(Config{ClientID: "id", ClientSecret: "secret", AccountSeq: 7, BaseURL: "https://example.test", HTTPClient: &http.Client{Transport: roundTripper(func(request *http.Request) (*http.Response, error) {
 		switch request.URL.Path {
@@ -92,6 +130,7 @@ func TestPortfolioReturnsAllHoldingsWithKRWWeights(t *testing.T) {
 		t.Fatalf("unexpected rates: %#v", book)
 	}
 }
+
 func response(status int, body string) *http.Response {
 	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: make(http.Header)}
 }

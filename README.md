@@ -105,10 +105,22 @@ Desktop을 실행한 뒤 아래 명령으로 로컬 Temporal Server, Web UI와
 Temporal gRPC는 `localhost:7233`, UI는 <http://localhost:8080>에서 제공됩니다.
 워커 컨테이너는 Compose 네트워크의 `temporal:7233`에 자동으로 연결됩니다.
 
+Compose는 로컬 소스에서 `valuation-engine`, `data-collector` 및
+`alert-dispatcher` 이미지를 빌드합니다. `data-collector-schedule`은
+`data-collector` 이미지를 공유합니다. 소스를 변경한 뒤에는 먼저 모든 로컬 이미지를
+다시 빌드하고, 기본 서비스(Temporal, 평가 엔진, 수집 워커)를 기동합니다.
+
 ```bash
 cp apps/data_collector/.env.example apps/data_collector/.env
+docker compose -f docker-compose.temporal.yml build
 docker compose -f docker-compose.temporal.yml up -d
 docker compose -f docker-compose.temporal.yml ps
+```
+
+한 명령으로 기본 서비스를 재빌드·기동하려면 다음을 사용할 수 있습니다.
+
+```bash
+docker compose -f docker-compose.temporal.yml up -d --build
 ```
 
 호스트에서 워커를 직접 실행하려면 기존처럼 아래 명령을 사용할 수 있습니다.
@@ -139,7 +151,7 @@ dispatcher를 시작합니다. 현재 repository의 테스트는 로컬 HTTP moc
 검증하며, 테스트나 기본 Compose 실행에서 Slack으로 메시지를 보내지 않습니다.
 
 ```bash
-docker compose -f docker-compose.temporal.yml --profile alerts up -d alert-dispatcher
+docker compose -f docker-compose.temporal.yml --profile alerts up -d --build alert-dispatcher
 ```
 
 로컬 Temporal 데이터까지 지우려면 다음 명령을 사용합니다.

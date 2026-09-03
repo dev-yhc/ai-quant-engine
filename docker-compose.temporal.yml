@@ -23,11 +23,11 @@ services:
       POSTGRES_USER: temporal
       POSTGRES_PWD: temporal
       POSTGRES_SEEDS: temporal-postgresql
-      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/docker.yaml
     ports:
       - "7233:7233"
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "7233"]
+      test: ["CMD-SHELL", "nc -z \"$$(hostname -i)\" 7233"]
       interval: 5s
       timeout: 3s
       start_period: 30s

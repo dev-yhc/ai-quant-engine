@@ -20,13 +20,16 @@ type memoryRepository struct {
 func (r *memoryRepository) LoadPolicy(context.Context, string) (strategydomain.LadderPolicy, error) {
 	return r.policy, nil
 }
+
 func (r *memoryRepository) FindDecision(_ context.Context, eventID, strategyID string) (Decision, bool, error) {
 	decision, ok := r.decisions[eventID+":"+strategyID]
 	return decision, ok, nil
 }
+
 func (r *memoryRepository) PendingExposure(context.Context, string, string) (strategydomain.Exposure, error) {
 	return r.pending, nil
 }
+
 func (r *memoryRepository) SaveDecisionAndOrder(_ context.Context, d Decision, order *orderdomain.Intent, _ time.Time) (Decision, bool, error) {
 	if prior, ok := r.decisions[d.SignalEventID+":"+d.StrategyID]; ok {
 		return prior, false, nil
@@ -43,11 +46,13 @@ type portfolioStub struct{ book tradingdomain.Portfolio }
 func (p portfolioStub) Portfolio(context.Context) (tradingdomain.Portfolio, error) {
 	return p.book, nil
 }
+
 func (p portfolioStub) USDToKRWRate(context.Context) (string, error) { return "1250", nil }
 
 func enabledPolicy() orderdomain.RiskPolicy {
 	return orderdomain.RiskPolicy{ExecutionEnabled: true, AutoExecutionEnabled: true, AllowedStrategies: map[string]struct{}{"us10y-overvalued-ief": {}}, AllowedInstruments: map[string]struct{}{"US:IEF": {}}, MaxOrderAmount: "1000"}
 }
+
 func signal(id string, score float64) strategydomain.SignalEvent {
 	return strategydomain.SignalEvent{ID: id, StrategyID: "us10y-overvalued-ief", ZScore: score, Signal: strategydomain.Overvalued, ModelVersion: "v1", AsOf: "2026-09-03", EvaluatedAt: time.Date(2026, 9, 3, 0, 0, 0, 0, time.UTC)}
 }

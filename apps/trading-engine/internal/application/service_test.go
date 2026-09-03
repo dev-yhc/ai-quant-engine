@@ -22,6 +22,7 @@ func (r *memoryRepository) Accept(_ context.Context, i domain.Intent, now time.T
 	r.order = &domain.Order{Intent: i, Status: domain.Pending, NextAttemptAt: now, BrokerIdempotencyTill: now.Add(9 * time.Minute)}
 	return *r.order, true, nil
 }
+
 func (r *memoryRepository) ClaimNext(_ context.Context, now time.Time) (domain.Order, bool, error) {
 	if r.order == nil || r.order.Status != domain.Pending || r.order.NextAttemptAt.After(now) {
 		return domain.Order{}, false, nil
@@ -29,11 +30,13 @@ func (r *memoryRepository) ClaimNext(_ context.Context, now time.Time) (domain.O
 	r.order.Status = domain.Processing
 	return *r.order, true, nil
 }
+
 func (r *memoryRepository) MarkSubmitted(_ context.Context, id, brokerID string, _ time.Time) error {
 	r.order.Status = domain.Submitted
 	r.order.BrokerOrderID = brokerID
 	return nil
 }
+
 func (r *memoryRepository) Reschedule(_ context.Context, _ string, a int, next time.Time, message string) error {
 	r.order.Status = domain.Pending
 	r.order.AttemptCount = a
@@ -41,16 +44,19 @@ func (r *memoryRepository) Reschedule(_ context.Context, _ string, a int, next t
 	r.order.LastError = message
 	return nil
 }
+
 func (r *memoryRepository) MarkRejected(_ context.Context, _ string, message string, _ time.Time) error {
 	r.order.Status = domain.Rejected
 	r.order.LastError = message
 	return nil
 }
+
 func (r *memoryRepository) MarkUnknown(_ context.Context, _ string, message string, _ time.Time) error {
 	r.order.Status = domain.Unknown
 	r.order.LastError = message
 	return nil
 }
+
 func (r *memoryRepository) EnqueuePortfolioAlert(_ context.Context, book tradingdomain.Portfolio) error {
 	r.alerts = append(r.alerts, book)
 	return nil
@@ -64,15 +70,19 @@ type brokerStub struct {
 }
 
 func (b brokerStub) Submit(context.Context, domain.Intent) (string, error) { return b.id, b.err }
+
 func (b brokerStub) Portfolio(context.Context) (tradingdomain.Portfolio, error) {
 	return b.portfolio, b.bookErr
 }
+
 func testPolicy() domain.RiskPolicy {
 	return domain.RiskPolicy{ExecutionEnabled: true, AutoExecutionEnabled: true, AllowedStrategies: map[string]struct{}{"valuation": {}}, AllowedInstruments: map[string]struct{}{"US:AAPL": {}}, MaxQuantity: "10"}
 }
+
 func testIntent(now time.Time) domain.Intent {
 	return domain.Intent{ID: "o1", SignalEventID: "signal-1", ApprovalRequestID: "approval-1", Strategy: "valuation", Instrument: "US:AAPL", Side: domain.Buy, OrderType: domain.Market, Quantity: "1", IdempotencyKey: "event-1", PolicyVersion: "v1", Mode: domain.ApprovedIntent, ExpiresAt: now.Add(time.Hour)}
 }
+
 func TestApprovalIntentIsDurableThenSubmitted(t *testing.T) {
 	now := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
 	repo := &memoryRepository{}
@@ -87,6 +97,7 @@ func TestApprovalIntentIsDurableThenSubmitted(t *testing.T) {
 		t.Fatalf("process: %#v %v", repo.order, err)
 	}
 }
+
 func TestAutoSignalRequiresFeatureFlag(t *testing.T) {
 	now := time.Now().UTC()
 	p := testPolicy()
@@ -105,6 +116,7 @@ func TestAutoSignalRequiresFeatureFlag(t *testing.T) {
 type temporaryError struct{ error }
 
 func (temporaryError) Retryable() bool { return true }
+
 func TestRetryDoesNotCreateSecondIntent(t *testing.T) {
 	now := time.Date(2026, 9, 2, 0, 0, 0, 0, time.UTC)
 	repo := &memoryRepository{}
